@@ -1,134 +1,103 @@
-# Blueprint Open-Source: AI-Native Hardware Design Generator
+# Blueprint OSS
 
-Blueprint is an open-source, prompt-to-verifiable hardware project compiler. Users enter a natural-language idea for any physical/electronic project and the system produces a structured, electrically validated, and buildable hardware project package.
+Blueprint OSS is an open-source, AI-native hardware design generator. It turns a natural-language idea into a structured, validated hardware project package (Hardware IR) plus schematics, BOM, and build steps.
 
-It mimics the core features of [blueprint.am](https://blueprint.am/), but with an advanced multi-agent backend orchestrated by Google's Agent Development Kit (ADK) and a rich React Flow circuit canvas UI.
+This repository is an **MVP and research prototype** focused on **low-voltage maker electronics** (3.3V–5V) and safe, educational projects.
 
----
+## What you can build (MVP)
+- IoT sensor nodes and dashboards
+- Simple automation controllers (relays, servos, pumps)
+- Environmental monitors and data loggers
+- Small wearable or tabletop devices
+- Learning projects that map pins, nets, and BOMs
 
-## 🚀 Key Features
+## How it works
+Prompt → agents → Hardware IR → validation → outputs.
 
-1. **7-Agent Hardware Assembly Pipeline**
-   * Coordinated via Google ADK, transforming raw prompts into structured hardware compilations.
-2. **Typed Hardware Intermediate Representation (IR)**
-   * Every project compiles into a robust, typed Pydantic JSON graph with strict schema validation.
-3. **Automated Circuit Safety Auditor**
-   * Evaluates the compiled circuit netlist against 5 crucial physical and electrical rules:
-     * **Short Circuit Protection**: Detects direct power-to-ground connections.
-     * **Voltage Mismatch Warning**: Warns of direct logic links between mismatched voltage lines (e.g. 5.0V MCU pin to 3.3V sensor pin).
-     * **Floating IC Check**: Flags microcontrollers/integrated circuits lacking VCC or ground references.
-     * **Pin Conflict Auditor**: Disallows digital pin reuse across multiple signal lines.
-     * **Over-current Risk Alert**: Protects MCU internal regulators from peak draw from power-hungry servos or relays.
-4. **Self-Healing Connection Loop**
-   * If the circuit auditor discovers critical violations, it pipes the validation reports back into the Wiring/Netlist agent for auto-correction before final compilation.
-5. **Interactive CAD Schematic Viewer**
-   * Zoomable and pannable React Flow layout showing color-coded wires (Power, Ground, I2C, SPI, Digital) and physical part pinouts.
-6. **BOM, Assembly & Mechanical Slicing**
-   * Instantly calculates total cost, formats step-by-step assembly walkthroughs, and outputs 3D printing parameter specs.
-
----
-
-## 📂 Repository Structure
-
-```directory
-├── backend/
-│   ├── agents/
-│   │   ├── __init__.py
-│   │   └── orchestrator.py        # Google ADK agent configurations & workflow pipeline
-│   ├── main.py                    # FastAPI server routers, seed, and project endpoints
-│   ├── models.py                  # Pydantic models for the structured Hardware IR
-│   ├── database.py                # PostgreSQL / SQLAlchemy storage backend
-│   ├── seed_db.py                 # Inventory database populated with seed components
-│   ├── validation.py              # 5-rule electrical circuit auditor
-│   ├── utils.py                   # SVG Schematic & Mermaid generator helpers
-│   └── requirements.txt           # Backend python dependencies
-├── frontend/
-│   ├── app/
-│   │   ├── layout.tsx
-│   │   ├── globals.css            # Custom styles & React Flow edge animations
-│   │   └── page.tsx               # CAD dashboard UI
-│   ├── postcss.config.js
-│   ├── tailwind.config.js
-│   └── package.json               # Next.js dependencies
-└── examples/
-    ├── plant_watering.json        # Auto-Grow Moisture monitor preset
-    ├── smart_thermostat.json      # Climate controller thermostat preset
-    └── biometric_deadbolt.json    # Bluetooth keyless deadbolt lock preset
+```mermaid
+flowchart LR
+  A[Prompt + optional image] --> B[Multi-agent workflow\nGoogle ADK + Gemini Flash]
+  B --> C[Typed Hardware IR (Pydantic JSON)]
+  C --> D[Rule-based validation + repair loop]
+  D --> E[Outputs: React Flow schematic, SVG/Mermaid, BOM, assembly steps]
+  C --> F[(Project database)]
 ```
 
----
+- **Prompts** describe what you want to build.
+- **Agents** interpret the intent, choose components, and draft wiring.
+- **Hardware IR** is the structured, typed source of truth for everything else.
+- **Validation** checks for electrical and safety issues and can trigger repair.
+- **Outputs** render in the UI and export as JSON packages.
 
-## ⚡ Quick Start Guide
+## MVP scope & safety boundaries
+Blueprint intentionally limits scope to low-voltage maker electronics:
+- 3.3V–5V DC systems
+- Breadboard-friendly microcontrollers, sensors, displays, and actuators
+- Educational and hobbyist prototypes
 
-### Prerequisites
-* Python 3.11+
-* Node.js v18+
-* PostgreSQL database (Optional: falls back gracefully to standard SQLite `blueprint.db` locally if Postgres connection is not set up, ensuring 100% out-of-the-box local reliability).
+It blocks or warns on high-risk domains (mains AC, medical, automotive, weapons, high-power battery systems). See [docs/validation.md](docs/validation.md) for details.
 
----
+## Local setup (quick)
+Detailed instructions live in [docs/setup.md](docs/setup.md).
 
-### 1. Set Up and Run the Backend
-
-Navigate to the `backend/` folder:
+### Backend
 ```bash
 cd backend
-```
-
-Create a virtual environment and activate it:
-```bash
 python3 -m venv venv
 source venv/bin/activate
-```
-
-Install the required python packages:
-```bash
 pip install -r requirements.txt
-```
 
-#### Database Setup
-Create a `.env` file inside `backend/` to point to your PostgreSQL instance and specify your Gemini API Key:
-```env
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/blueprint
-GEMINI_API_KEY=your_gemini_api_key_here
-```
-
-Populate the database with our seed component templates (ESP32, Arduino Nano, sensors, displays, relays, and batteries):
-```bash
+# Optional: set DATABASE_URL and GEMINI_API_KEY in backend/.env
 python3 seed_db.py
-```
-
-Run the FastAPI backend server:
-```bash
 uvicorn main:app --reload --port 8000
 ```
-Your backend will run on [http://localhost:8000](http://localhost:8000) and documentation is available at `/docs`.
 
-*Note: If no `GEMINI_API_KEY` is provided, the backend automatically transitions to high-fidelity, offline simulation fallback mode, loading pre-compiled example structures depending on your prompt keywords. This allows immediate interface testing!*
-
----
-
-### 2. Set Up and Run the Frontend
-
-Navigate to the `frontend/` folder:
+### Frontend
 ```bash
-cd ../frontend
-```
-
-Install Node dependencies:
-```bash
+cd frontend
 npm install
-```
-
-Start the Next.js development server:
-```bash
 npm run dev
 ```
-Open [http://localhost:3000](http://localhost:3000) in your browser to experience the CAD interface!
+
+Then open http://localhost:3000 (frontend) and http://localhost:8000/docs (API docs).
+
+## Screenshots (placeholders)
+![Blueprint UI placeholder](docs/assets/ui-placeholder.svg)
+
+## Project structure (high level)
+```
+backend/   FastAPI + agent orchestration + validation
+frontend/  Next.js + React Flow UI
+docs/      Architecture and contributor docs
+examples/  Sample Hardware IR projects
+```
+
+## Documentation
+- [Architecture](docs/architecture.md)
+- [Hardware IR](docs/hardware-ir.md)
+- [Agents](docs/agents.md)
+- [Validation](docs/validation.md)
+- [Database](docs/database.md)
+- [Frontend](docs/frontend.md)
+- [Backend](docs/backend.md)
+- [Setup](docs/setup.md)
+- [Development](docs/development.md)
+- [Roadmap](docs/roadmap.md)
+- [Examples](docs/examples.md)
+
+## Roadmap (summary)
+- Expand the component library and validation rules
+- Improve explainability, repair feedback, and UI tooling
+- Add richer exports (PCB-ready netlists, mechanical assets)
+
+Full roadmap: [docs/roadmap.md](docs/roadmap.md).
+
+## Contributing
+Blueprint OSS is research-oriented and welcomes contributors. Start with:
+1. Read [docs/development.md](docs/development.md)
+2. Open an issue or proposal
+3. Send a focused PR with tests or repro steps when applicable
 
 ---
 
-## 🧪 Experience the Core Workflows
-
-1. **Preset One-Click Loading**: Click Smart Watering, Thermostat, or Smart Deadbolt in the top header to instantly render complex pin-to-pin wiring schematics and assembly steps.
-2. **AI-Native Compiling**: Enter a prompt like `"Build an automated weather station measuring barometric pressure using ESP32 and BMP280, displaying on OLED screen."` and watch the 7-Agent pipeline run in real-time.
-3. **Downloadable Hardware IR Packages**: Export your validated project as a JSON structure using the **Export Package** button.
+If you're new to hardware, this project aims to be a gentle path from idea to buildable prototype.
