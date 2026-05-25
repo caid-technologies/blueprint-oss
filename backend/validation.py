@@ -192,28 +192,42 @@ def validate_circuit(components: List[ComponentInstance], nets: List[ConnectionN
     # ----------------------------------------------------
     has_mcu = False
     mcu_ref = None
-    has_high_draw_actuator = False
-    actuator_refs = []
+    high_draw_actuator_refs: Dict[str, str] = {}
     
     for ref_des, comp in component_lookup.items():
         if comp.category.lower() == "microcontroller":
             has_mcu = True
             mcu_ref = ref_des
-        elif comp.category.lower() == "actuator" or comp.part_number in ["Relay-5V-1Ch", "SG90-Servo"]:
-            has_high_draw_actuator = True
-            actuator_refs.append(f"{comp.name} ({ref_des})")
+        else:
+            component_text = f"{comp.name} {comp.part_number}".lower()
+            is_high_draw_actuator = (
+                comp.part_number in ["Relay-5V-1Ch", "SG90-Servo"]
+                or any(keyword in component_text for keyword in ["relay", "servo", "motor", "pump"])
+            )
+            if is_high_draw_actuator:
+                high_draw_actuator_refs[ref_des] = f"{comp.name} ({ref_des})"
             
-    if has_mcu and has_high_draw_actuator:
+    if has_mcu and high_draw_actuator_refs:
         for net in nets:
-            is_3v3_net = (net.voltage == 3.3)
-            contains_mcu = any(p.ref_des == mcu_ref for p in net.pins)
-            contains_actuator = any(p.ref_des in [ref.split()[-1][1:-1] for ref in actuator_refs] for p in net.pins)
+            if net.net_type.lower() != "power" or net.voltage != 3.3:
+                continue
+
+            contains_mcu_power_pin = False
+            powered_actuators = []
+            for pin_ref in net.pins:
+                pin = pin_lookup.get((pin_ref.ref_des, pin_ref.pin_id))
+                if not pin or pin.pin_type.lower() != "power":
+                    continue
+                if pin_ref.ref_des == mcu_ref:
+                    contains_mcu_power_pin = True
+                elif pin_ref.ref_des in high_draw_actuator_refs:
+                    powered_actuators.append(high_draw_actuator_refs[pin_ref.ref_des])
             
-            if is_3v3_net and contains_mcu and contains_actuator:
+            if contains_mcu_power_pin and powered_actuators:
                 issues.append(ValidationIssue(
                     severity="WARNING",
                     category="Overcurrent Risk",
-                    description=f"High-power actuator(s) [{', '.join(actuator_refs)}] are powered from the same 3.3V low-current output "
+                    description=f"High-power actuator(s) [{', '.join(powered_actuators)}] are powered from the same 3.3V low-current output "
                                 f"net '{net.name}' as the MCU ({mcu_ref}). Relays and servo motors draw peak currents that can crash the microcontroller or burn out its internal voltage regulator.",
                     troubleshooting="Isolate the actuator power. Connect the servo/relay power pin to a dedicated 5V input rail or external power source, sharing only the ground reference (GND) with the MCU."
                 ))

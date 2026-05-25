@@ -1,0 +1,184 @@
+{
+  "hardware_ir_version": "0.1",
+  "overview": {
+    "title": "Pocket MP3 Player",
+    "description": "A slim, portable MP3 player powered by an ESP32 audio stack with local storage, a color display, physical playback controls, USB-C charging, Bluetooth-ready connectivity, and a 3D printed rounded enclosure.",
+    "difficulty": "Intermediate",
+    "estimated_cost": 45.05,
+    "category": "Portable Audio"
+  },
+  "requirements": {
+    "requirements": [
+      "Play MP3 files from expandable microSD storage.",
+      "Display track, battery, and playback status on a compact color screen.",
+      "Use physical play/pause, next, and previous buttons.",
+      "Charge a compact Li-Po battery through USB-C."
+    ],
+    "power_needs": "3.7V Li-Po battery with USB-C charge management and protected 3.3V logic rail.",
+    "operating_voltage": 3.3,
+    "physical_constraints": [
+      "Slim and portable",
+      "Pocket-sized",
+      "Rectangular body",
+      "Rounded edges",
+      "Color display",
+      "Physical buttons",
+      "USB-C connectivity",
+      "Bluetooth integration",
+      "Minimalist design",
+      "Lightweight",
+      "Ergonomic"
+    ],
+    "safety_notes": [
+      "Verify Li-Po polarity before connecting USB power.",
+      "Keep amplifier outputs isolated from logic GPIO pins."
+    ],
+    "missing_info": []
+  },
+  "components": [
+    { "ref_des": "U1", "part_number": "ESP32-WROOM-32E", "name": "ESP32-WROOM-32E Module", "category": "Microcontroller", "quantity": 1, "unit_price": 5.5, "rationale": "Main Controller. Provides Wi-Fi and Bluetooth connectivity for app and web interface.", "pins": [] },
+    { "ref_des": "SPK1", "part_number": "SPK-8OHM-1W", "name": "8 Ohm 1W Mini Speaker", "category": "Actuator", "quantity": 1, "unit_price": 2, "rationale": "Small Internal Speaker. Small 8 Ohm 1W speaker for audio playback.", "pins": [] },
+    { "ref_des": "BAT1", "part_number": "LiPo-3V7-500mAh", "name": "3.7V 500mAh Li-Po Battery", "category": "Power", "quantity": 1, "unit_price": 8, "rationale": "Rechargeable Power Source. Small battery for the wireless audio module.", "pins": [] },
+    { "ref_des": "PWR1", "part_number": "TP4056-USB-C", "name": "TP4056 USB-C Li-Ion Charger Module", "category": "Power", "quantity": 1, "unit_price": 3, "rationale": "Li-Po Charging & Power Management. Charges the Li-ion battery and provides overcharge/discharge protection.", "pins": [] },
+    { "ref_des": "BTN1", "part_number": "TACT-6MM", "name": "Play/Pause Button", "category": "Passives", "quantity": 1, "unit_price": 0.35, "rationale": "Primary playback control.", "pins": [] },
+    { "ref_des": "BTN2", "part_number": "TACT-6MM", "name": "Next Track Button", "category": "Passives", "quantity": 1, "unit_price": 0.35, "rationale": "Track advance control.", "pins": [] },
+    { "ref_des": "BTN3", "part_number": "TACT-6MM", "name": "Previous Track Button", "category": "Passives", "quantity": 1, "unit_price": 0.35, "rationale": "Previous track control.", "pins": [] },
+    { "ref_des": "SD1", "part_number": "MICROSD-SPI", "name": "Expandable Storage Module", "category": "Passives", "quantity": 1, "unit_price": 2.5, "rationale": "microSD storage for MP3 files.", "pins": [] },
+    { "ref_des": "J1", "part_number": "TRS-3.5MM", "name": "3.5mm Headphone Output", "category": "Passives", "quantity": 1, "unit_price": 1.2, "rationale": "External analog audio output.", "pins": [] },
+    { "ref_des": "DAC1", "part_number": "I2S-DAC-AMP", "name": "Audio DAC with Amplifier", "category": "Actuator", "quantity": 1, "unit_price": 4.2, "rationale": "Digital-to-analog audio conversion and speaker drive.", "pins": [] },
+    { "ref_des": "USB1", "part_number": "USB-C-16P", "name": "USB-C Data & Charging Port", "category": "Power", "quantity": 1, "unit_price": 1.5, "rationale": "USB-C data and charging interface.", "pins": [] },
+    { "ref_des": "DISP1", "part_number": "OLED-COLOR-1.3", "name": "Track Information Display", "category": "Display", "quantity": 1, "unit_price": 9, "rationale": "Color display for waveform, battery, and track metadata.", "pins": [] },
+    { "ref_des": "MCAP1", "part_number": "CAP-PLAY", "name": "Play/Pause Button Cap", "category": "Mechanical", "quantity": 1, "unit_price": 0.3, "rationale": "Printed tactile control cap.", "pins": [] },
+    { "ref_des": "MCAP2", "part_number": "CAP-NEXT", "name": "Next Track Button Cap", "category": "Mechanical", "quantity": 1, "unit_price": 0.3, "rationale": "Printed tactile control cap.", "pins": [] },
+    { "ref_des": "MCAP3", "part_number": "CAP-PREV", "name": "Previous Track Button Cap", "category": "Mechanical", "quantity": 1, "unit_price": 0.3, "rationale": "Printed tactile control cap.", "pins": [] },
+    { "ref_des": "SCR1", "part_number": "M2-SCREW", "name": "M2 Enclosure Screws", "category": "Mechanical", "quantity": 4, "unit_price": 0.2, "rationale": "Secures the shell and bezel.", "pins": [] },
+    { "ref_des": "INS1", "part_number": "M2-INSERT", "name": "M2 Heat-Set Inserts", "category": "Mechanical", "quantity": 4, "unit_price": 0.225, "rationale": "Threaded inserts for serviceable enclosure.", "pins": [] },
+    { "ref_des": "MECH1", "part_number": "MP3-SHELL", "name": "Main Enclosure Shell", "category": "3D Print", "quantity": 1, "unit_price": 2.1, "rationale": "Primary rounded pocket enclosure.", "pins": [] },
+    { "ref_des": "MECH2", "part_number": "MP3-FRONT", "name": "Front Bezel", "category": "3D Print", "quantity": 1, "unit_price": 0.6, "rationale": "Faceplate for display and controls.", "pins": [] },
+    { "ref_des": "MECH3", "part_number": "MP3-BACK", "name": "Back Cover with Speaker Vents", "category": "3D Print", "quantity": 1, "unit_price": 1, "rationale": "Rear cover with acoustic grille.", "pins": [] },
+    { "ref_des": "MECH4", "part_number": "OLED-MOUNT", "name": "OLED Display Bezel Mount", "category": "3D Print", "quantity": 1, "unit_price": 0.4, "rationale": "Aligns display behind the front window.", "pins": [] },
+    { "ref_des": "MECH5", "part_number": "ESP32-MOUNT", "name": "ESP32 Main Controller Mount", "category": "3D Print", "quantity": 1, "unit_price": 0.4, "rationale": "Internal board mounting platform.", "pins": [] }
+  ],
+  "nets": [
+    { "net_id": "NET_POWER", "name": "Protected 3.3V Logic Rail", "net_type": "Power", "voltage": 3.3, "pins": [{ "ref_des": "PWR1", "pin_id": "OUT+" }, { "ref_des": "U1", "pin_id": "3V3" }, { "ref_des": "DISP1", "pin_id": "VCC" }, { "ref_des": "DAC1", "pin_id": "VCC" }, { "ref_des": "SD1", "pin_id": "VCC" }] },
+    { "net_id": "NET_AUDIO", "name": "I2S Audio Bus", "net_type": "Digital", "voltage": 3.3, "pins": [{ "ref_des": "U1", "pin_id": "I2S" }, { "ref_des": "DAC1", "pin_id": "DIN" }, { "ref_des": "SPK1", "pin_id": "SPK+" }] },
+    { "net_id": "NET_DISPLAY", "name": "Display Control Bus", "net_type": "I2C", "voltage": 3.3, "pins": [{ "ref_des": "U1", "pin_id": "I2C" }, { "ref_des": "DISP1", "pin_id": "SDA/SCL" }] },
+    { "net_id": "NET_STORAGE", "name": "microSD Storage Bus", "net_type": "SPI", "voltage": 3.3, "pins": [{ "ref_des": "U1", "pin_id": "SPI" }, { "ref_des": "SD1", "pin_id": "SPI" }] }
+  ],
+  "buses": [],
+  "pin_mappings": [],
+  "assembly": [
+    { "step_num": 1, "title": "Print and prepare enclosure", "description": "Print the rounded main shell, front bezel, back cover with speaker vents, OLED mount, and ESP32 board mount.", "danger_flag": false, "danger_message": null, "affected_components": ["MECH1", "MECH2", "MECH3", "MECH4", "MECH5"] },
+    { "step_num": 2, "title": "Assemble power subsystem", "description": "Connect the 3.7V Li-Po battery to the TP4056 charger module and route protected output to the ESP32, display, DAC, and microSD module.", "danger_flag": true, "danger_message": "Verify battery polarity before applying USB-C power.", "affected_components": ["BAT1", "PWR1", "USB1"] },
+    { "step_num": 3, "title": "Wire audio, display, and storage", "description": "Wire the display over I2C, the microSD module over SPI, and the DAC amplifier over I2S. Keep speaker wiring away from ESP32 antenna edge.", "danger_flag": false, "danger_message": null, "affected_components": ["U1", "DISP1", "SD1", "DAC1", "SPK1"] },
+    { "step_num": 4, "title": "Install controls and close shell", "description": "Mount tactile switches behind the front control pad, press-fit the button caps, install heat-set inserts, and close with M2 screws.", "danger_flag": false, "danger_message": null, "affected_components": ["BTN1", "BTN2", "BTN3", "MCAP1", "MCAP2", "MCAP3", "SCR1", "INS1"] }
+  ],
+  "mechanical": {
+    "enclosure_type": "3D Printed Rounded Pocket Enclosure",
+    "mounting_guidance": "Use internal bosses for ESP32, DAC, charger, microSD module, OLED bezel, speaker, and battery tray.",
+    "fabrication_details": [
+      "Overall body target: 100mm x 54mm x 21mm.",
+      "2.0mm wall thickness with 0.4mm display lip.",
+      "Heat-set M2 inserts for a serviceable rear cover.",
+      "Speaker vent slots on the side or back cover."
+    ],
+    "fabrication_cost_estimate_usd": 6.0,
+    "cad_sources": [
+      {
+        "name": "Adafruit Walkmp3rson CAD files",
+        "source_type": "Reference CAD",
+        "url": "https://learn.adafruit.com/walkmp3rson-personal-mp3-tape-player/cad-files",
+        "file_formats": ["STL", "STEP", "Fusion 360"],
+        "license": "Adafruit Learn reference design; verify reuse terms on source page",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Use as a portable audio enclosure reference and adapt cutouts for ESP32, OLED, USB-C, buttons, and speaker."
+      },
+      {
+        "name": "ESP32 Project Enclosure with OLED SSD1306",
+        "source_type": "Open STL",
+        "url": "https://3dgo.app/models/printables/94864",
+        "file_formats": ["STL"],
+        "license": "Creative Commons attribution-sharealike listing mirror; verify original Printables license",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Good reference for ESP32/OLED internal mounting and display bezel geometry."
+      }
+    ],
+    "render_dimensions": { "x_mm": 100, "y_mm": 21, "z_mm": 54 },
+    "component_placements": [
+      { "ref_des": "MECH1", "label": "Main Enclosure Shell", "category": "3D Print", "layer": "enclosure", "position": { "x_mm": 0, "y_mm": 0, "z_mm": 0 }, "size": { "x_mm": 100, "y_mm": 21, "z_mm": 54 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "envelope", "notes": "Transparent render envelope for the rounded pocket enclosure." },
+      { "ref_des": "MECH2", "label": "Front Bezel", "category": "3D Print", "layer": "print", "position": { "x_mm": 0, "y_mm": -9.6, "z_mm": 2 }, "size": { "x_mm": 82, "y_mm": 2.6, "z_mm": 39 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Front faceplate aligned to display and button controls." },
+      { "ref_des": "MECH3", "label": "Back Cover with Speaker Vents", "category": "3D Print", "layer": "print", "position": { "x_mm": 0, "y_mm": 9.6, "z_mm": 0 }, "size": { "x_mm": 88, "y_mm": 2.6, "z_mm": 46 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "back", "notes": "Rear service cover with vent alignment for SPK1." },
+      { "ref_des": "U1", "label": "ESP32-WROOM-32E Module", "category": "Microcontroller", "layer": "electrical", "position": { "x_mm": 0, "y_mm": 0, "z_mm": -2 }, "size": { "x_mm": 38, "y_mm": 18, "z_mm": 5 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal", "notes": "Central controller mounted on MECH5 with antenna clearance." },
+      { "ref_des": "DISP1", "label": "Track Information Display", "category": "Display", "layer": "electrical", "position": { "x_mm": 0, "y_mm": -9, "z_mm": 13 }, "size": { "x_mm": 34, "y_mm": 3, "z_mm": 18 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Display centerline is aligned with the front bezel window." },
+      { "ref_des": "BAT1", "label": "3.7V 500mAh Li-Po Battery", "category": "Power", "layer": "electrical", "position": { "x_mm": -27, "y_mm": 5, "z_mm": -14 }, "size": { "x_mm": 48, "y_mm": 12, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "floor", "notes": "Low rear-left placement keeps mass balanced." },
+      { "ref_des": "PWR1", "label": "TP4056 USB-C Li-Ion Charger Module", "category": "Power", "layer": "electrical", "position": { "x_mm": 24, "y_mm": -5, "z_mm": -14 }, "size": { "x_mm": 34, "y_mm": 14, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal", "notes": "Placed near USB1 to minimize charging path length." },
+      { "ref_des": "USB1", "label": "USB-C Data & Charging Port", "category": "Power", "layer": "electrical", "position": { "x_mm": 43, "y_mm": -8, "z_mm": -15 }, "size": { "x_mm": 14, "y_mm": 8, "z_mm": 7 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "right edge", "notes": "Edge-mounted charge/data cutout." },
+      { "ref_des": "SPK1", "label": "8 Ohm 1W Mini Speaker", "category": "Actuator", "layer": "electrical", "position": { "x_mm": 32, "y_mm": 6, "z_mm": 10 }, "size": { "x_mm": 24, "y_mm": 10, "z_mm": 24 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "back", "notes": "Aligned behind rear cover speaker vents." },
+      { "ref_des": "DAC1", "label": "Audio DAC with Amplifier", "category": "Actuator", "layer": "electrical", "position": { "x_mm": 20, "y_mm": 0, "z_mm": 0 }, "size": { "x_mm": 28, "y_mm": 14, "z_mm": 6 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal", "notes": "Short run to SPK1 and J1 output." },
+      { "ref_des": "SD1", "label": "Expandable Storage Module", "category": "Passives", "layer": "electrical", "position": { "x_mm": -30, "y_mm": -1, "z_mm": 3 }, "size": { "x_mm": 24, "y_mm": 14, "z_mm": 4 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal", "notes": "Accessible storage module adjacent to controller SPI pins." },
+      { "ref_des": "BTN1", "label": "Play/Pause Button", "category": "Passives", "layer": "electrical", "position": { "x_mm": -18, "y_mm": -9, "z_mm": -7 }, "size": { "x_mm": 10, "y_mm": 7, "z_mm": 10 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Front tactile switch behind the printed control cap." },
+      { "ref_des": "BTN2", "label": "Next Track Button", "category": "Passives", "layer": "electrical", "position": { "x_mm": 0, "y_mm": -9, "z_mm": -7 }, "size": { "x_mm": 10, "y_mm": 7, "z_mm": 10 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Front tactile switch behind the printed control cap." },
+      { "ref_des": "BTN3", "label": "Previous Track Button", "category": "Passives", "layer": "electrical", "position": { "x_mm": 18, "y_mm": -9, "z_mm": -7 }, "size": { "x_mm": 10, "y_mm": 7, "z_mm": 10 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Front tactile switch behind the printed control cap." },
+      { "ref_des": "J1", "label": "3.5mm Headphone Output", "category": "Passives", "layer": "electrical", "position": { "x_mm": -43, "y_mm": -7, "z_mm": -12 }, "size": { "x_mm": 13, "y_mm": 8, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "left edge", "notes": "Edge-mounted analog audio jack." },
+      { "ref_des": "MCAP1", "label": "Play/Pause Button Cap", "category": "Mechanical", "layer": "mechanism", "position": { "x_mm": -18, "y_mm": -10.5, "z_mm": -7 }, "size": { "x_mm": 11, "y_mm": 4, "z_mm": 11 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Exterior cap aligned over BTN1." },
+      { "ref_des": "MCAP2", "label": "Next Track Button Cap", "category": "Mechanical", "layer": "mechanism", "position": { "x_mm": 0, "y_mm": -10.5, "z_mm": -7 }, "size": { "x_mm": 11, "y_mm": 4, "z_mm": 11 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Exterior cap aligned over BTN2." },
+      { "ref_des": "MCAP3", "label": "Previous Track Button Cap", "category": "Mechanical", "layer": "mechanism", "position": { "x_mm": 18, "y_mm": -10.5, "z_mm": -7 }, "size": { "x_mm": 11, "y_mm": 4, "z_mm": 11 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Exterior cap aligned over BTN3." },
+      { "ref_des": "MECH4", "label": "OLED Display Bezel Mount", "category": "3D Print", "layer": "print", "position": { "x_mm": 0, "y_mm": -7.8, "z_mm": 13 }, "size": { "x_mm": 40, "y_mm": 3, "z_mm": 22 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Retains display behind window." },
+      { "ref_des": "MECH5", "label": "ESP32 Main Controller Mount", "category": "3D Print", "layer": "print", "position": { "x_mm": 0, "y_mm": -1, "z_mm": -8 }, "size": { "x_mm": 44, "y_mm": 5, "z_mm": 22 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "floor", "notes": "Controller mounting platform." },
+      { "ref_des": "SCR1", "label": "M2 Enclosure Screws", "category": "Mechanical", "layer": "structural", "position": { "x_mm": -42, "y_mm": 6, "z_mm": -20 }, "size": { "x_mm": 5, "y_mm": 5, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "corners", "notes": "Four-corner screw set represented as a grouped placement." },
+      { "ref_des": "INS1", "label": "M2 Heat-Set Inserts", "category": "Mechanical", "layer": "structural", "position": { "x_mm": 42, "y_mm": 6, "z_mm": -20 }, "size": { "x_mm": 5, "y_mm": 5, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "corners", "notes": "Threaded insert set paired with SCR1." }
+    ],
+    "spatial_relationships": [
+      { "source_ref_des": "U1", "target_ref_des": "DISP1", "relation": "display above controller on the front face", "axis": "Z", "offset_mm": 15, "notes": "Display sits above the controller and forward on Y." },
+      { "source_ref_des": "DISP1", "target_ref_des": "MECH4", "relation": "aligned with display bezel mount", "axis": "Y", "offset_mm": 1.2, "notes": "OLED centerline is held by the printed mount." },
+      { "source_ref_des": "BAT1", "target_ref_des": "PWR1", "relation": "battery adjacent to charger", "axis": "X", "offset_mm": 51, "notes": "Battery and charger remain on the lower internal plane." },
+      { "source_ref_des": "DAC1", "target_ref_des": "SPK1", "relation": "audio output aligned to speaker", "axis": "Z", "offset_mm": 10, "notes": "Amplifier output is routed upward to the rear speaker." },
+      { "source_ref_des": "BTN1", "target_ref_des": "MCAP1", "relation": "cap centered over switch", "axis": "Y", "offset_mm": -1.5, "notes": "Button cap protrudes through the front bezel." },
+      { "source_ref_des": "BTN2", "target_ref_des": "MCAP2", "relation": "cap centered over switch", "axis": "Y", "offset_mm": -1.5, "notes": "Button cap protrudes through the front bezel." },
+      { "source_ref_des": "BTN3", "target_ref_des": "MCAP3", "relation": "cap centered over switch", "axis": "Y", "offset_mm": -1.5, "notes": "Button cap protrudes through the front bezel." }
+    ],
+    "manufacturability_rating": "Moderate"
+  },
+  "constraints": [
+    "Slim and Portable",
+    "Pocket-sized",
+    "Rectangular Body",
+    "Rounded Edges",
+    "Color Display",
+    "Physical Buttons",
+    "USB-C Connectivity",
+    "Bluetooth Integration",
+    "Minimalist Design",
+    "Lightweight",
+    "Ergonomic"
+  ],
+  "power_rails": [],
+  "estimated_current_draw_ma": 180,
+  "fabrication_notes": [
+    "Overall body target: 100mm x 54mm x 21mm.",
+    "Use heat-set inserts for repeatable assembly."
+  ],
+  "assembly_metadata": {
+    "status": "active",
+    "model_name": "gemini-3.5-flash",
+    "pipeline": "Gemini multimodal + ADK-style hardware agents",
+    "product_visual": "pocket_mp3_player",
+    "image_features": [
+      "Slim and Portable",
+      "Pocket-sized",
+      "Rectangular Body",
+      "Rounded Edges",
+      "Color Display",
+      "Physical Buttons",
+      "USB-C Connectivity",
+      "Bluetooth Integration",
+      "Minimalist Design",
+      "Lightweight",
+      "Ergonomic"
+    ],
+    "render_dimensions": { "x_mm": 100, "y_mm": 21, "z_mm": 54 }
+  },
+  "project_version_history": [],
+  "validation": { "critical": [], "warning": [], "info": [] },
+  "is_valid": true
+}

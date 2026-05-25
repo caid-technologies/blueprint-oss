@@ -1,6 +1,40 @@
-from typing import Dict, List, Any
+import re
+from typing import Dict
 import html
 from backend.models import HardwareIR
+
+_MERMAID_ID_PATTERN = re.compile(r"[^a-zA-Z0-9_]")
+
+
+def _mermaid_text(value: object) -> str:
+    return html.escape(str(value or ""), quote=True).replace("\n", " ")
+
+
+def _mermaid_node_id(value: object, fallback: str) -> str:
+    node_id = _MERMAID_ID_PATTERN.sub("_", str(value or fallback)).strip("_")
+    if not node_id:
+        node_id = fallback
+    if node_id[0].isdigit():
+        node_id = f"N_{node_id}"
+    return node_id
+
+
+def _build_mermaid_node_ids(components: list) -> Dict[str, str]:
+    seen: Dict[str, int] = {}
+    node_ids: Dict[str, str] = {}
+
+    for index, comp in enumerate(components, start=1):
+        base_id = _mermaid_node_id(comp.ref_des, f"COMP_{index}")
+        count = seen.get(base_id, 0)
+        seen[base_id] = count + 1
+        node_ids[comp.ref_des] = base_id if count == 0 else f"{base_id}_{count + 1}"
+
+    return node_ids
+
+
+def _mermaid_component_ref(node_ids: Dict[str, str], ref_des: str) -> str:
+    return node_ids.get(ref_des, _mermaid_node_id(ref_des, "UNKNOWN"))
+
 
 def generate_mermaid_chart(ir: HardwareIR) -> str:
     """
@@ -8,16 +42,19 @@ def generate_mermaid_chart(ir: HardwareIR) -> str:
     between components for direct display on the client.
     """
     if not ir or not ir.components:
-        return "graph TD;\n  Empty[No Components Instantiated];"
+        return 'graph TD\n  Empty["No Components Instantiated"]'
 
     lines = ["graph LR"]
+    node_ids = _build_mermaid_node_ids(ir.components)
     
     # Define subgraphs/styling or component nodes
     for comp in ir.components:
-        safe_name = html.escape(comp.name)
-        # Style node based on category
-        node_style = f"{comp.ref_des}[\"<b>{comp.ref_des}</b><br/>{safe_name}<br/><small>{comp.part_number}</small>\"]"
-        lines.append(f"  {node_style}")
+        label = (
+            f"<b>{_mermaid_text(comp.ref_des)}</b><br/>"
+            f"{_mermaid_text(comp.name)}<br/>"
+            f"<small>{_mermaid_text(comp.part_number)}</small>"
+        )
+        lines.append(f'  {node_ids[comp.ref_des]}["{label}"]')
 
     # Build connection lines grouped by net
     # For Mermaid, draw lines from the source (usually MCU or power supply) to targets
@@ -42,7 +79,10 @@ def generate_mermaid_chart(ir: HardwareIR) -> str:
                 conn_key = (src.ref_des, dest.ref_des, net.net_id)
                 if conn_key not in drawn_connections:
                     drawn_connections.add(conn_key)
-                    lines.append(f"  {src.ref_des} -->|\"{net.name} ({src.pin_id} ➔ {dest.pin_id})\"| {dest.ref_des}")
+                    label = _mermaid_text(f"{net.name} ({src.pin_id} -> {dest.pin_id})")
+                    src_node = _mermaid_component_ref(node_ids, src.ref_des)
+                    dest_node = _mermaid_component_ref(node_ids, dest.ref_des)
+                    lines.append(f'  {src_node} -->|"{label}"| {dest_node}')
         else:
             # Connect components sequentially if no MCU is present
             for i in range(len(net.pins) - 1):
@@ -51,7 +91,10 @@ def generate_mermaid_chart(ir: HardwareIR) -> str:
                 conn_key = (src.ref_des, dest.ref_des, net.net_id)
                 if conn_key not in drawn_connections:
                     drawn_connections.add(conn_key)
-                    lines.append(f"  {src.ref_des} -.-\"{net.name} ({src.pin_id} ↔ {dest.pin_id})\"-.- {dest.ref_des}")
+                    label = _mermaid_text(f"{net.name} ({src.pin_id} <-> {dest.pin_id})")
+                    src_node = _mermaid_component_ref(node_ids, src.ref_des)
+                    dest_node = _mermaid_component_ref(node_ids, dest.ref_des)
+                    lines.append(f'  {src_node} -.->|"{label}"| {dest_node}')
 
     return "\n".join(lines)
 

@@ -1,10 +1,9 @@
 {
-  "hardware_ir_version": "0.1",
   "overview": {
     "title": "Smart Nest-Style Environmental Thermostat Controller",
     "description": "Intelligent wall-mounted environment controller with climate regulation.",
     "difficulty": "Intermediate",
-    "estimated_cost": 15.50,
+    "estimated_cost": 11.50,
     "category": "Smart Home"
   },
   "requirements": {
@@ -14,7 +13,7 @@
       "Actuate solid-state heating elements or fan control through an optoisolated relay switch.",
       "Maintain low-power standby during battery backups."
     ],
-    "power_needs": "Dual Power supply: 3.7V rechargeable Lithium backup with 5V stationary adapter feed.",
+    "power_needs": "5V stationary adapter feed. Rechargeable battery backup requires a charger/boost module not represented in this low-voltage wiring preset.",
     "operating_voltage": 3.3,
     "physical_constraints": [
       "Standard wall box mounting.",
@@ -38,7 +37,7 @@
       "pins": [
         {"pin_id": "3V3", "name": "3.3V Power Out", "pin_type": "Power", "voltage": 3.3, "description": "3.3V Regulated Output"},
         {"pin_id": "GND", "name": "Ground", "pin_type": "Ground", "voltage": 0.0, "description": "System Ground Reference"},
-        {"pin_id": "D25", "name": "GPIO25 / DAC_CH1", "pin_type": "Digital", "voltage": 3.3, "description": "DAC / General GPIO"},
+        {"pin_id": "D25", "name": "GPIO25", "pin_type": "Digital", "voltage": 3.3, "description": "General GPIO"},
         {"pin_id": "D22", "name": "GPIO22 / I2C_SCL", "pin_type": "I2C", "voltage": 3.3, "description": "Primary I2C SCL"},
         {"pin_id": "D21", "name": "GPIO21 / I2C_SDA", "pin_type": "I2C", "voltage": 3.3, "description": "Primary I2C SDA"},
         {"pin_id": "VIN", "name": "External Power In", "pin_type": "Power", "voltage": 5.0, "description": "5V Unregulated Input"}
@@ -70,7 +69,7 @@
       "pins": [
         {"pin_id": "VCC", "name": "Module Power (5V)", "pin_type": "Power", "voltage": 5.0, "description": "5V Relay coil power"},
         {"pin_id": "GND", "name": "Module Ground", "pin_type": "Ground", "voltage": 0.0, "description": "System Ground"},
-        {"pin_id": "IN", "name": "Signal Input", "pin_type": "Digital", "voltage": 5.0, "description": "Logic input to trigger coil (optocoupled)"},
+        {"pin_id": "IN", "name": "Signal Input", "pin_type": "Digital", "voltage": 3.3, "description": "3.3V-compatible logic input to trigger optocoupled relay module"},
         {"pin_id": "COM", "name": "Switch Common Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "High-power common pole"},
         {"pin_id": "NO", "name": "Switch Normally Open Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "Connected to COM only when energized"},
         {"pin_id": "NC", "name": "Switch Normally Closed Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "Connected to COM by default"}
@@ -92,16 +91,16 @@
       ]
     },
     {
-      "ref_des": "BAT1",
-      "part_number": "Battery-LiPo-3.7V",
-      "name": "3.7V Lithium Polymer Battery (1200mAh)",
+      "ref_des": "PWR1",
+      "part_number": "USB-5V-Plug",
+      "name": "5V Stationary Adapter Feed",
       "category": "Power",
       "quantity": 1,
-      "unit_price": 5.50,
-      "rationale": "Supports emergency battery backup should a domestic utility power cutout occur.",
+      "unit_price": 1.50,
+      "rationale": "Provides regulated 5V input for ESP32 VIN and the relay coil supply.",
       "pins": [
-        {"pin_id": "POS", "name": "Positive Lead (Red)", "pin_type": "Power", "voltage": 3.7, "description": "Positive terminal"},
-        {"pin_id": "NEG", "name": "Negative Lead (Black)", "pin_type": "Ground", "voltage": 0.0, "description": "Negative reference terminal"}
+        {"pin_id": "5V", "name": "5V Power Line", "pin_type": "Power", "voltage": 5.0, "description": "5.0V regulated rail"},
+        {"pin_id": "GND", "name": "Ground", "pin_type": "Ground", "voltage": 0.0, "description": "Ground"}
       ]
     }
   ],
@@ -116,7 +115,7 @@
         {"ref_des": "SEN1", "pin_id": "GND"},
         {"ref_des": "ACT1", "pin_id": "GND"},
         {"ref_des": "DISP1", "pin_id": "GND"},
-        {"ref_des": "BAT1", "pin_id": "NEG"}
+        {"ref_des": "PWR1", "pin_id": "GND"}
       ]
     },
     {
@@ -128,6 +127,17 @@
         {"ref_des": "U1", "pin_id": "3V3"},
         {"ref_des": "SEN1", "pin_id": "VCC"},
         {"ref_des": "DISP1", "pin_id": "VCC"}
+      ]
+    },
+    {
+      "net_id": "NET_5V",
+      "name": "5V Adapter Rail",
+      "net_type": "Power",
+      "voltage": 5.0,
+      "pins": [
+        {"ref_des": "PWR1", "pin_id": "5V"},
+        {"ref_des": "U1", "pin_id": "VIN"},
+        {"ref_des": "ACT1", "pin_id": "VCC"}
       ]
     },
     {
@@ -163,14 +173,6 @@
       ]
     }
   ],
-  "buses": [
-    {
-      "bus_id": "BUS_I2C_1",
-      "bus_type": "I2C",
-      "clock_frequency_hz": 100000.0,
-      "nets": ["NET_I2C_SDA", "NET_I2C_SCL"]
-    }
-  ],
   "pin_mappings": [
     {"mcu_pin": "D21", "connected_to": "OLED/BMP280 Data", "net_name": "NET_I2C_SDA"},
     {"mcu_pin": "D22", "connected_to": "OLED/BMP280 Clock", "net_name": "NET_I2C_SCL"},
@@ -179,11 +181,11 @@
   "assembly": [
     {
       "step_num": 1,
-      "title": "Wire power and Backup Battery",
-      "description": "Seat the ESP32 on your proto-board. Plug the 3.7V battery POS wire into ESP32 VIN or designated LiPo charger interface. Ground negative to ESP32 GND.",
+      "title": "Wire 5V adapter and low-voltage rails",
+      "description": "Seat the ESP32 on your proto-board. Connect PWR1 5V to ESP32 VIN and relay VCC, then tie PWR1 GND to the shared ground rail. Use ESP32 3V3 only for the BMP280 and OLED logic rail.",
       "danger_flag": true,
-      "danger_message": "Avoid puncturing, bending, or shorting battery terminals! Lithium batteries store immense charge.",
-      "affected_components": ["U1", "BAT1"]
+      "danger_message": "Do not attach a bare LiPo directly to VIN. Add a proper charger/boost module before implementing battery backup.",
+      "affected_components": ["U1", "PWR1", "ACT1"]
     },
     {
       "step_num": 2,
@@ -195,7 +197,7 @@
     {
       "step_num": 3,
       "title": "Integrate HVAC Switching relay",
-      "description": "Power the relay coil with 5V VIN. Send input line (IN) to ESP32 GPIO pin D25. Route furnace control lines into Normally Open (NO) and Common (COM) blocks.",
+      "description": "Power the relay coil from the PWR1 5V rail. Send the 3.3V-compatible input line (IN) to ESP32 GPIO pin D25. Route furnace control lines into Normally Open (NO) and Common (COM) blocks.",
       "danger_flag": true,
       "danger_message": "Unplug structural heating supplies before hooking up high voltage terminals!",
       "affected_components": ["ACT1", "U1"]
@@ -209,41 +211,55 @@
       "Laser cut clear acrylic viewing window.",
       "Mounting holes spaced 60mm vertically to match US wall standards."
     ],
+    "fabrication_cost_estimate_usd": 7.5,
+    "cad_sources": [
+      {
+        "name": "Thermostat trim plate STL candidate index",
+        "source_type": "Reference CAD",
+        "url": "https://www.stlfinder.com/3dmodels/thermostat-trim-plate/",
+        "file_formats": ["STL"],
+        "license": "Model-specific licenses vary; verify selected model before fabrication",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Use as a geometry reference for wall coverage, then generate a project-specific acrylic DXF for the OLED/BMP280 layout."
+      },
+      {
+        "name": "Google Nest thermostat wallmount candidate index",
+        "source_type": "Paid STL",
+        "url": "https://cults3d.com/es/etiquetas/termostato%2Bnest%2Be%2Buk",
+        "file_formats": ["STL"],
+        "license": "Commercial model listing; verify current download price and license before reuse",
+        "estimated_unit_price_usd": 4.02,
+        "notes": "Useful reference for wall-mount clip geometry and cable pass-through placement."
+      }
+    ],
+    "render_dimensions": { "x_mm": 86, "y_mm": 24, "z_mm": 86 },
+    "component_placements": [
+      { "ref_des": "U1", "label": "ESP32 NodeMCU Development Board", "category": "Microcontroller", "layer": "electrical", "position": { "x_mm": 0, "y_mm": 0, "z_mm": -8 }, "size": { "x_mm": 38, "y_mm": 18, "z_mm": 5 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "wall back plate", "notes": "Controller centered behind the acrylic cover." },
+      { "ref_des": "DISP1", "label": "0.96 inch OLED Display (I2C)", "category": "Display", "layer": "electrical", "position": { "x_mm": 0, "y_mm": -10.5, "z_mm": 18 }, "size": { "x_mm": 34, "y_mm": 3, "z_mm": 18 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front acrylic", "notes": "Display is centered in the front viewing window." },
+      { "ref_des": "SEN1", "label": "BMP280 Barometric Pressure & Temp Sensor", "category": "Sensor", "layer": "electrical", "position": { "x_mm": -24, "y_mm": -10, "z_mm": 6 }, "size": { "x_mm": 18, "y_mm": 10, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front vent", "notes": "Sensor is exposed to the front ventilation slot." },
+      { "ref_des": "ACT1", "label": "5V 1-Channel Optocoupled Relay Module", "category": "Actuator", "layer": "electrical", "position": { "x_mm": 24, "y_mm": 4, "z_mm": -12 }, "size": { "x_mm": 38, "y_mm": 18, "z_mm": 16 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "back plate", "notes": "Relay is placed to the right for cable routing to HVAC terminals." },
+      { "ref_des": "PWR1", "label": "5V Stationary Adapter Feed", "category": "Power", "layer": "electrical", "position": { "x_mm": -23, "y_mm": 5, "z_mm": -27 }, "size": { "x_mm": 32, "y_mm": 14, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "back plate", "notes": "Adapter lead enters low on the back plate with strain relief." }
+    ],
+    "spatial_relationships": [
+      { "source_ref_des": "U1", "target_ref_des": "DISP1", "relation": "display above controller", "axis": "Z", "offset_mm": 26, "notes": "OLED is vertically offset above the ESP32." },
+      { "source_ref_des": "U1", "target_ref_des": "SEN1", "relation": "sensor left of controller", "axis": "X", "offset_mm": -24, "notes": "BMP280 sits left and forward at the vent opening." },
+      { "source_ref_des": "U1", "target_ref_des": "ACT1", "relation": "relay right of controller", "axis": "X", "offset_mm": 24, "notes": "Relay is laterally separated from the sensor path." },
+      { "source_ref_des": "U1", "target_ref_des": "PWR1", "relation": "adapter feed below controller", "axis": "Z", "offset_mm": -19, "notes": "5V adapter wiring enters below the controller on the back plate." }
+    ],
     "manufacturability_rating": "Moderate"
   },
-  "constraints": [
-    "Standard wall box mounting.",
-    "Total weight under 150g.",
-    "Operating Voltage: 3.3V"
-  ],
-  "power_rails": [
-    {
-      "rail_id": "RAIL_3V3",
-      "voltage": 3.3,
-      "max_current_capacity_ma": 500.0,
-      "source_component": "U1"
-    }
-  ],
-  "estimated_current_draw_ma": 205.0,
-  "fabrication_notes": [
-    "Front-facing slot for BMP280 air-exposure.",
-    "Laser cut clear acrylic viewing window.",
-    "Mounting holes spaced 60mm vertically to match US wall standards."
-  ],
-  "assembly_metadata": {
-    "status": "active",
-    "revision": 1
-  },
-  "project_version_history": [
-    {
-      "version": "0.1",
-      "description": "Initial fallback design generation"
-    }
-  ],
   "validation": {
     "critical": [],
     "warning": [],
-    "info": []
+    "info": [
+      {
+        "severity": "INFO",
+        "category": "Scope Gap",
+        "description": "The battery-backup requirement is documented, but this preset wiring only models the safe 5V adapter-powered thermostat core.",
+        "troubleshooting": "Add a LiPo charger/protection module and boost or power-path regulator before implementing rechargeable backup operation."
+      }
+    ]
   },
+  "validation_issues": [],
   "is_valid": true
 }

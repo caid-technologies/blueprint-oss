@@ -1,17 +1,21 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
   MiniMap,
   Node,
   Edge,
+  Handle,
+  NodeProps,
+  Position,
   useNodesState,
   useEdgesState,
   MarkerType,
 } from "reactflow";
 import "reactflow/dist/style.css";
+import MechanicalScene from "../components/mechanical-scene";
 import {
   Sparkles,
   Wrench,
@@ -27,7 +31,6 @@ import {
   Download,
   Database,
   ArrowRight,
-  Send,
   Battery,
   Monitor,
   Printer,
@@ -36,8 +39,183 @@ import {
   Layers,
   Volume2,
   Paperclip,
-  X
+  X,
+  ExternalLink,
 } from "lucide-react";
+
+const API_URL = "http://localhost:8000";
+
+const samplePrompts = [
+  "Compact handheld device with display, controls, USB-C power, and enclosure",
+  "Environmental monitor with sensor feedback, display, and battery power",
+  "Small controller for a low-voltage actuator or relay",
+];
+
+const communityProjects = [
+  {
+    title: "Portable device",
+    description: "Reference design for a compact handheld product with display, controls, and enclosure notes.",
+    file: "pocket_mp3_player.json",
+  },
+  {
+    title: "Monitoring kit",
+    description: "General-purpose sensing and control example with power, wiring, and enclosure guidance.",
+    file: "plant_watering.json",
+  },
+  {
+    title: "Control module",
+    description: "Compact controller example with display, sensor, and validated power rails.",
+    file: "smart_thermostat.json",
+  },
+];
+
+const pipelineMermaidCode = `graph LR
+  IMAGE["Image Input"] --> FEATURES["Feature Extraction"]
+  FEATURES --> IR["Typed Hardware IR (Pydantic JSON)"]
+  IR --> BOM["BOM"]
+  IR --> CAD["Mechanical CAD"]`;
+
+const workspaceTabs = [
+  { id: "overview", label: "IMAGE", icon: Eye },
+  { id: "bom", label: "BOM", icon: ShoppingBag },
+  { id: "mechanical", label: "MECH", icon: Box },
+  { id: "schematic", label: "WIRE", icon: Cpu },
+  { id: "assembly", label: "DOCS", icon: Info },
+  { id: "svg", label: "SVG", icon: Layers },
+];
+
+function normalizeTab(tab: string | null) {
+  if (!tab) return null;
+  const aliases: Record<string, string> = {
+    image: "overview",
+    mech: "mechanical",
+    wire: "schematic",
+    docs: "assembly",
+  };
+  const normalized = aliases[tab] || tab;
+  return workspaceTabs.some((item) => item.id === normalized) ? normalized : null;
+}
+
+const categoryTone: Record<string, { text: string; bg: string; border: string; label: string }> = {
+  microcontroller: { text: "text-cyan-400", bg: "bg-cyan-950/40", border: "border-cyan-500/40", label: "MCU" },
+  sensor: { text: "text-emerald-400", bg: "bg-emerald-950/30", border: "border-emerald-500/30", label: "SENSOR" },
+  actuator: { text: "text-orange-400", bg: "bg-orange-950/35", border: "border-orange-500/40", label: "ACTUATOR" },
+  display: { text: "text-pink-400", bg: "bg-pink-950/35", border: "border-pink-500/40", label: "DISPLAY" },
+  power: { text: "text-yellow-400", bg: "bg-yellow-950/35", border: "border-yellow-500/40", label: "POWER" },
+  passives: { text: "text-violet-400", bg: "bg-violet-950/35", border: "border-violet-500/40", label: "IO" },
+  mechanical: { text: "text-rose-400", bg: "bg-rose-950/30", border: "border-rose-500/35", label: "MECH" },
+  "3d print": { text: "text-indigo-300", bg: "bg-indigo-950/35", border: "border-indigo-400/35", label: "3D PRINT" },
+  default: { text: "text-slate-300", bg: "bg-slate-900", border: "border-slate-700", label: "PART" },
+};
+
+type SchematicPin = {
+  pin_id: string;
+  name?: string;
+  pin_type?: string;
+  voltage?: number | null;
+};
+
+type SchematicNodeData = {
+  component: any;
+  pins: SchematicPin[];
+  tone: {
+    label: string;
+    border: string;
+    text: string;
+    soft: string;
+  };
+};
+
+type PlacementPoint = {
+  x: number;
+  y: number;
+};
+
+const schematicTones: Record<string, { label: string; border: string; text: string; soft: string }> = {
+  microcontroller: { label: "MCU", border: "#22c7dd", text: "#06b6d4", soft: "#ecfeff" },
+  sensor: { label: "SENSOR", border: "#3b82f6", text: "#2563eb", soft: "#eff6ff" },
+  actuator: { label: "ACTUATOR", border: "#ff6b21", text: "#ea580c", soft: "#fff7ed" },
+  power: { label: "POWER", border: "#f5a400", text: "#d97706", soft: "#fffbeb" },
+  passives: { label: "MODULE", border: "#8b5cf6", text: "#7c3aed", soft: "#f5f3ff" },
+  communication: { label: "MODULE", border: "#8b5cf6", text: "#7c3aed", soft: "#f5f3ff" },
+  display: { label: "DISPLAY", border: "#ec4899", text: "#db2777", soft: "#fdf2f8" },
+  default: { label: "PART", border: "#94a3b8", text: "#64748b", soft: "#f8fafc" },
+};
+
+const schematicNodeTypes = {
+  schematicPart: SchematicPartNode,
+};
+
+function SchematicPartNode({ data }: NodeProps<SchematicNodeData>) {
+  const { component, pins, tone } = data;
+  const Icon = iconForCategory(component.category);
+  const visiblePins = pins.length ? pins : [{ pin_id: "NC", name: "No connected pins", pin_type: "Passive" }];
+
+  return (
+    <div className="schematic-node w-[190px] bg-white px-3 py-3 text-center shadow-sm" style={{ border: `2px solid ${tone.border}` }}>
+      <div className="text-[8px] font-black uppercase leading-none tracking-[0.22em]" style={{ color: tone.text }}>
+        {tone.label}
+      </div>
+      <div className="mt-1 truncate text-[11px] font-black leading-tight text-[#202127]">{component.name || component.ref_des}</div>
+      <div className="mt-1 truncate text-[8px] font-bold leading-tight text-[#6f7280]">{component.part_number || component.ref_des}</div>
+
+      <div className="mx-auto mt-2 flex h-[76px] w-[108px] items-center justify-center border border-[#d9dcec] bg-white" style={{ backgroundColor: tone.soft }}>
+        <Icon className="h-10 w-10" style={{ color: tone.text }} />
+      </div>
+
+      <div className="mt-2 flex flex-wrap justify-center gap-1">
+        {visiblePins.map((pin) => {
+          const disabled = pin.pin_id === "NC";
+          return (
+            <div
+              key={pin.pin_id}
+              className="relative max-w-full rounded-[3px] border bg-white px-1.5 py-0.5 text-[7px] font-black leading-none text-[#6f7280]"
+              style={{ borderColor: tone.border, color: disabled ? "#a8adba" : tone.text }}
+              title={`${pin.pin_id}${pin.name ? ` - ${pin.name}` : ""}`}
+            >
+              {!disabled && (
+                <>
+                  <Handle
+                    type="target"
+                    id={schematicHandleId(component.ref_des, pin.pin_id)}
+                    position={Position.Left}
+                    className="schematic-pin-handle"
+                    style={{ left: -7, top: "50%", ["--handle-border" as string]: tone.border, ["--handle-color" as string]: "#ffffff" }}
+                  />
+                  <Handle
+                    type="source"
+                    id={schematicHandleId(component.ref_des, pin.pin_id)}
+                    position={Position.Right}
+                    className="schematic-pin-handle"
+                    style={{ right: -7, top: "50%", ["--handle-border" as string]: tone.border, ["--handle-color" as string]: "#ffffff" }}
+                  />
+                </>
+              )}
+              <span className="block max-w-[72px] truncate">{pin.pin_id}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function schematicToneForCategory(category = "") {
+  return schematicTones[category.toLowerCase()] || schematicTones.default;
+}
+
+function pinKey(pin: SchematicPin) {
+  return pin.pin_id;
+}
+
+function schematicHandleId(refDes: string, pinId: string) {
+  return `${refDes}.${pinId}`;
+}
+
+function normalizePlacement(value: any): PlacementPoint | null {
+  if (!value || typeof value.x !== "number" || typeof value.y !== "number") return null;
+  return { x: value.x, y: value.y };
+}
 
 export default function Home() {
   const [prompt, setPrompt] = useState("");
@@ -47,35 +225,10 @@ export default function Home() {
   const [mermaidCode, setMermaidCode] = useState<string>("");
   const [svgSchematic, setSvgSchematic] = useState<string>("");
   const [projectHistory, setProjectHistory] = useState<any[]>([]);
+  const [showHeaderRecent, setShowHeaderRecent] = useState(false);
   const [catalogComponents, setCatalogComponents] = useState<any[]>([]);
   const [serverStatus, setServerStatus] = useState<"connected" | "disconnected">("disconnected");
-  
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const fileInputRefSidebar = useRef<HTMLInputElement>(null);
-  const fileInputRefCenter = useRef<HTMLInputElement>(null);
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setSelectedImage(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const removeSelectedImage = () => {
-    setSelectedImage(null);
-    if (fileInputRefSidebar.current) fileInputRefSidebar.current.value = "";
-    if (fileInputRefCenter.current) fileInputRefCenter.current.value = "";
-  };
-
-  // React Flow states
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-
-  // Active state for mechanical view controls
   const [mechElectricalActive, setMechElectricalActive] = useState(true);
   const [mechToggles, setMechToggles] = useState({
     structural: true,
@@ -85,10 +238,11 @@ export default function Home() {
     print: true,
   });
 
-  // API Backend URL (Assumes running on Port 8000)
-  const API_URL = "http://localhost:8000";
+  const fileInputRefSidebar = useRef<HTMLInputElement>(null);
+  const fileInputRefCenter = useRef<HTMLInputElement>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-  // Fetch initial catalog and server status on mount
   useEffect(() => {
     checkServerStatus();
     fetchCatalog();
@@ -98,11 +252,7 @@ export default function Home() {
   const checkServerStatus = async () => {
     try {
       const res = await fetch(`${API_URL}/`);
-      if (res.ok) {
-        setServerStatus("connected");
-      } else {
-        setServerStatus("disconnected");
-      }
+      setServerStatus(res.ok ? "connected" : "disconnected");
     } catch {
       setServerStatus("disconnected");
     }
@@ -111,10 +261,7 @@ export default function Home() {
   const fetchCatalog = async () => {
     try {
       const res = await fetch(`${API_URL}/api/components`);
-      if (res.ok) {
-        const data = await res.json();
-        setCatalogComponents(data);
-      }
+      if (res.ok) setCatalogComponents(await res.json());
     } catch (e) {
       console.error("Error fetching catalog", e);
     }
@@ -123,322 +270,347 @@ export default function Home() {
   const fetchProjectHistory = async () => {
     try {
       const res = await fetch(`${API_URL}/api/projects`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjectHistory(data);
-      }
+      if (res.ok) setProjectHistory(await res.json());
     } catch (e) {
       console.error("Error fetching project history", e);
     }
   };
 
-  // Convert Structured Hardware IR to React Flow Nodes & Edges
+  const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => setSelectedImage(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const removeSelectedImage = () => {
+    setSelectedImage(null);
+    if (fileInputRefSidebar.current) fileInputRefSidebar.current.value = "";
+    if (fileInputRefCenter.current) fileInputRefCenter.current.value = "";
+  };
+
   const buildReactFlowGraph = (ir: any) => {
-    if (!ir || !ir.components) return;
+    if (!ir?.components) return;
 
     const newNodes: Node[] = [];
     const newEdges: Edge[] = [];
-
-    // Filter only electrical parts for schematic nodes to keep view clean (like a real CAD board)
-    const electricalParts = ir.components.filter((c: any) => 
-      !["mechanical", "3d print"].includes(c.category.toLowerCase())
+    const electricalParts = ir.components.filter(
+      (component: any) => !["mechanical", "3d print"].includes(component.category?.toLowerCase())
     );
+    const electricalRefs = new Set(electricalParts.map((component: any) => component.ref_des));
+    const componentByRef = new Map<string, any>(electricalParts.map((component: any) => [component.ref_des, component]));
+    const pinMapByRef = new Map<string, Map<string, SchematicPin>>();
 
-    const mcus = electricalParts.filter((c: any) => c.category.toLowerCase() === "microcontroller");
-    const inputs = electricalParts.filter((c: any) => c.category.toLowerCase() === "sensor" || c.category.toLowerCase() === "power");
-    const outputs = electricalParts.filter((c: any) => ["actuator", "display", "passives"].includes(c.category.toLowerCase()));
+    electricalParts.forEach((component: any) => {
+      const pinMap = new Map<string, SchematicPin>();
+      (component.pins || []).forEach((pin: any) => {
+        if (!pin?.pin_id) return;
+        pinMap.set(pin.pin_id, {
+          pin_id: pin.pin_id,
+          name: pin.name,
+          pin_type: pin.pin_type,
+          voltage: pin.voltage,
+        });
+      });
+      pinMapByRef.set(component.ref_des, pinMap);
+    });
 
-    // Layout margins
-    const MCU_X = 400;
-    const INPUT_X = 50;
-    const OUTPUT_X = 750;
-
-    // Generate Nodes
-    electricalParts.forEach((comp: any) => {
-      let x = 400;
-      let y = 100;
-
-      // Assign position column
-      if (comp.category.toLowerCase() === "microcontroller") {
-        x = MCU_X;
-        const mcuIdx = mcus.findIndex((c: any) => c.ref_des === comp.ref_des);
-        y = mcuIdx * 280 + 100;
-      } else if (comp.category.toLowerCase() === "sensor" || comp.category.toLowerCase() === "power") {
-        x = INPUT_X;
-        const inputIdx = inputs.findIndex((c: any) => c.ref_des === comp.ref_des);
-        y = inputIdx * 160 + 50;
-      } else {
-        x = OUTPUT_X;
-        const outputIdx = outputs.findIndex((c: any) => c.ref_des === comp.ref_des);
-        y = outputIdx * 160 + 50;
-      }
-
-      // Design gorgeous dark CAD chip node
-      const themeColors = {
-        microcontroller: { bg: "bg-slate-900", border: "border-cyan-500/80 shadow-cyan-950/40", text: "text-cyan-400", badge: "bg-cyan-950/60 text-cyan-400 border-cyan-500/30" },
-        sensor: { bg: "bg-slate-900", border: "border-emerald-500/80 shadow-emerald-950/40", text: "text-emerald-400", badge: "bg-emerald-950/60 text-emerald-400 border-emerald-500/30" },
-        actuator: { bg: "bg-slate-900", border: "border-purple-500/80 shadow-purple-950/40", text: "text-purple-400", badge: "bg-purple-950/60 text-purple-400 border-purple-500/30" },
-        display: { bg: "bg-slate-900", border: "border-pink-500/80 shadow-pink-950/40", text: "text-pink-400", badge: "bg-pink-950/60 text-pink-400 border-pink-500/30" },
-        power: { bg: "bg-slate-900", border: "border-amber-500/80 shadow-amber-950/40", text: "text-amber-400", badge: "bg-amber-950/60 text-amber-400 border-amber-500/30" },
-        default: { bg: "bg-slate-900", border: "border-slate-500/80 shadow-slate-950/40", text: "text-slate-400", badge: "bg-slate-950/60 text-slate-400 border-slate-500/30" },
-      };
-
-      const style = themeColors[comp.category.toLowerCase() as keyof typeof themeColors] || themeColors.default;
-
-      newNodes.push({
-        id: comp.ref_des,
-        position: { x, y },
-        draggable: true,
-        data: {
-          label: (
-            <div className={`p-4 rounded-xl border-2 ${style.border} ${style.bg} ${style.text} w-64 text-left shadow-2xl transition-all duration-300 hover:border-white`}>
-              <div className="flex justify-between items-center mb-2">
-                <span className={`text-[8px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full border ${style.badge}`}>
-                  {comp.category}
-                </span>
-                <span className="font-extrabold text-xs font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-white">{comp.ref_des}</span>
-              </div>
-              <h4 className="font-black text-xs text-white truncate mb-1">{comp.name}</h4>
-              <p className="text-[9px] text-slate-400 font-mono tracking-tight mb-2">{comp.part_number}</p>
-              
-              <div className="border-t border-slate-800/80 pt-2 mt-2">
-                <div className="text-[8px] uppercase tracking-widest font-extrabold text-slate-500 mb-1">Pinout Config</div>
-                <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[8px] font-mono">
-                  {comp.pins.slice(0, 8).map((p: any) => (
-                    <div key={p.pin_id} className="flex justify-between border-b border-slate-800/30 py-0.5">
-                      <span className="font-bold text-slate-300 truncate max-w-[50px]">{p.pin_id}</span>
-                      <span className="text-slate-500 truncate max-w-[50px]">{p.name}</span>
-                    </div>
-                  ))}
-                  {comp.pins.length > 8 && (
-                    <div className="col-span-2 text-center text-[7px] text-slate-500 mt-1">
-                      + {comp.pins.length - 8} more pins
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          ),
-        },
-        style: { background: "transparent", border: "none", width: 256 },
+    (ir.nets || []).forEach((net: any) => {
+      (net.pins || []).forEach((pinRef: any) => {
+        if (!electricalRefs.has(pinRef.ref_des)) return;
+        const pinMap = pinMapByRef.get(pinRef.ref_des);
+        if (!pinMap || pinMap.has(pinRef.pin_id)) return;
+        pinMap.set(pinRef.pin_id, {
+          pin_id: pinRef.pin_id,
+          name: pinRef.pin_id,
+          pin_type: net.net_type,
+          voltage: net.voltage,
+        });
       });
     });
 
-    // Generate Edges from connection nets
-    const netColors = {
-      ground: "#000000",       // Black
-      power: "#ef4444",        // Red
-      i2c: "#06b6d4",          // Cyan
-      spi: "#a855f7",          // Purple
-      digital: "#3b82f6",      // Blue
-      analog: "#f59e0b",       // Amber
-      pwm: "#10b981",          // Emerald
-      default: "#64748b"       // Slate
+    const schematicMeta = ir.assembly_metadata?.schematic || {};
+    const explicitPlacements = schematicMeta.placements || {};
+    const defaultColumns: Record<string, { x: number; y: number }> = {
+      power: { x: 360, y: 60 },
+      sensor: { x: 620, y: 60 },
+      microcontroller: { x: 620, y: 300 },
+      passives: { x: 880, y: 120 },
+      communication: { x: 880, y: 360 },
+      actuator: { x: 1140, y: 120 },
+      display: { x: 1140, y: 360 },
+      default: { x: 880, y: 560 },
+    };
+    const categoryCounts: Record<string, number> = {};
+
+    electricalParts.forEach((component: any) => {
+      const category = component.category?.toLowerCase() || "default";
+      const placement = normalizePlacement(explicitPlacements[component.ref_des]);
+      const baseColumn = defaultColumns[category] || defaultColumns.default;
+      const groupIndex = categoryCounts[category] || 0;
+      categoryCounts[category] = groupIndex + 1;
+      const position = placement || {
+        x: baseColumn.x,
+        y: baseColumn.y + groupIndex * 185,
+      };
+      const pins = Array.from(pinMapByRef.get(component.ref_des)?.values() || []).sort((a, b) =>
+        pinKey(a).localeCompare(pinKey(b), undefined, { numeric: true })
+      );
+
+      newNodes.push({
+        id: component.ref_des,
+        type: "schematicPart",
+        position,
+        draggable: true,
+        data: {
+          component,
+          pins,
+          tone: schematicToneForCategory(category),
+        },
+        style: { background: "transparent", border: "none", width: 190 },
+      });
+    });
+
+    const netStyles: Record<string, { color: string; dash?: string; width: number }> = {
+      ground: { color: "#94a3b8", dash: "8 6", width: 2 },
+      power: { color: "#f5a400", dash: "5 5", width: 2 },
+      i2c: { color: "#22c55e", width: 2 },
+      spi: { color: "#22c55e", width: 2 },
+      digital: { color: "#22c55e", width: 2 },
+      analog: { color: "#22c55e", width: 2 },
+      pwm: { color: "#22c55e", width: 2 },
+      default: { color: "#22c55e", width: 2 },
     };
 
-    ir.nets.forEach((net: any) => {
-      const netType = net.net_type.toLowerCase();
-      const color = netColors[netType as keyof typeof netColors] || netColors.default;
-      const isPowerGround = ["power", "ground"].includes(netType);
+    const pinTypeForRef = (pinRef: any) =>
+      pinMapByRef.get(pinRef.ref_des)?.get(pinRef.pin_id)?.pin_type?.toLowerCase() || "";
 
-      if (net.pins.length >= 2) {
-        // Sequentially connect pins in the net to represent schematic flow
-        for (let i = 0; i < net.pins.length - 1; i++) {
-          const srcPin = net.pins[i];
-          const destPin = net.pins[i + 1];
-
-          // Make sure both pins are actually represented as electrical nodes
-          const hasSrc = electricalParts.some((c: any) => c.ref_des === srcPin.ref_des);
-          const hasDest = electricalParts.some((c: any) => c.ref_des === destPin.ref_des);
-
-          if (hasSrc && hasDest) {
-            newEdges.push({
-              id: `edge_${net.net_id}_${srcPin.ref_des}_to_${destPin.ref_des}`,
-              source: srcPin.ref_des,
-              target: destPin.ref_des,
-              animated: !isPowerGround, // Animate signal paths
-              label: `${net.name} (${srcPin.pin_id}➔${destPin.pin_id})`,
-              labelStyle: { fill: "#94a3b8", fontWeight: 700, fontSize: 8, fontFamily: "monospace" },
-              style: {
-                stroke: color,
-                strokeWidth: isPowerGround ? 2.5 : 1.5,
-                strokeDasharray: netType === "ground" ? "5,5" : "none",
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 10,
-                height: 10,
-                color,
-              },
-            });
-          }
-        }
+    const chooseSourcePin = (net: any, usablePins: any[]) => {
+      const netType = net.net_type?.toLowerCase() || "default";
+      if (netType === "power" || netType === "ground") {
+        return (
+          usablePins.find((pinRef: any) => componentByRef.get(pinRef.ref_des)?.category?.toLowerCase() === "power") ||
+          usablePins.find((pinRef: any) => pinTypeForRef(pinRef) === netType) ||
+          usablePins[0]
+        );
       }
+      return (
+        usablePins.find((pinRef: any) => componentByRef.get(pinRef.ref_des)?.category?.toLowerCase() === "microcontroller") ||
+        usablePins[0]
+      );
+    };
+
+    const edgeLabel = (net: any, sourcePin: any, targetPin: any) => {
+      const voltage = typeof net.voltage === "number" ? `${net.voltage}V` : net.net_type || "net";
+      return `${net.name || net.net_id} / ${voltage} / ${sourcePin.pin_id}->${targetPin.pin_id}`;
+    };
+
+    (ir.nets || []).forEach((net: any) => {
+      const netType = net.net_type?.toLowerCase() || "default";
+      const style = netStyles[netType] || netStyles.default;
+      const usablePins = (net.pins || []).filter((pinRef: any) => electricalRefs.has(pinRef.ref_des));
+
+      if (usablePins.length < 2) return;
+
+      const sourcePin = chooseSourcePin(net, usablePins);
+      usablePins
+        .filter((targetPin: any) => targetPin !== sourcePin)
+        .forEach((targetPin: any, index: number) => {
+          const id = `edge_${net.net_id}_${sourcePin.ref_des}_${sourcePin.pin_id}_to_${targetPin.ref_des}_${targetPin.pin_id}_${index}`;
+
+          newEdges.push({
+            id,
+            source: sourcePin.ref_des,
+            sourceHandle: schematicHandleId(sourcePin.ref_des, sourcePin.pin_id),
+            target: targetPin.ref_des,
+            targetHandle: schematicHandleId(targetPin.ref_des, targetPin.pin_id),
+            type: "smoothstep",
+            animated: false,
+            label: edgeLabel(net, sourcePin, targetPin),
+            labelBgPadding: [4, 2],
+            labelBgBorderRadius: 2,
+            labelBgStyle: { fill: "#ffffff", fillOpacity: 0.88 },
+            labelStyle: { fill: style.color, fontWeight: 800, fontSize: 9, fontFamily: "monospace" },
+            style: {
+              stroke: style.color,
+              strokeWidth: style.width,
+              strokeDasharray: style.dash || "none",
+            },
+            markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: style.color },
+          });
+        });
     });
 
     setNodes(newNodes);
     setEdges(newEdges);
   };
 
-  // Triggers API prompt generation
-  const handleGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!prompt.trim()) return;
+  const handleGenerate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const promptText = prompt.trim() || "Infer a buildable hardware project from the uploaded reference image.";
+    if (!prompt.trim() && !selectedImage) return;
 
+    const imageData = selectedImage;
     setIsLoading(true);
     checkServerStatus();
 
     try {
       const res = await fetch(`${API_URL}/api/generate`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ 
-          prompt,
-          image_data: selectedImage || null
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: promptText,
+          image_data: imageData || null,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setProjectIR(data.project_ir);
-        setMermaidCode(data.mermaid_code);
-        setSvgSchematic(data.svg_schematic);
-        buildReactFlowGraph(data.project_ir);
-        fetchProjectHistory();
-        setSelectedImage(null); // Clear image after successful generation
-        setActiveTab("overview"); // Jump to overview to admire project specifications!
-      } else {
-        alert("Error from compilation server. Running with simulated fallback...");
-      }
-    } catch (e) {
-      console.warn("Connection to FastAPI failed. Running high-fidelity local simulation fallback...");
-      const mockRes = await runMockCompilation(prompt);
+      if (!res.ok) throw new Error("Compilation server failed");
+
+      const data = await res.json();
+      setProjectIR(data.project_ir);
+      setMermaidCode(data.mermaid_code);
+      setSvgSchematic(data.svg_schematic);
+      buildReactFlowGraph(data.project_ir);
+      fetchProjectHistory();
+    } catch (error) {
+      console.warn("Using local simulation fallback", error);
+      const mockRes = await runMockCompilation(promptText, imageData);
       setProjectIR(mockRes.project_ir);
       setMermaidCode(mockRes.mermaid_code);
       setSvgSchematic(mockRes.svg_schematic);
       buildReactFlowGraph(mockRes.project_ir);
-      setSelectedImage(null); // Clear image
-      setActiveTab("overview");
     } finally {
+      setSelectedImage(null);
+      setActiveTab("overview");
       setIsLoading(false);
     }
   };
 
-  // Loads prebuilt example templates directly into visualizer
   const loadExample = async (filename: string) => {
     setIsLoading(true);
     try {
       const res = await fetch(`/examples/${filename}`);
-      if (res.ok) {
-        const ir = await res.json();
-        setProjectIR(ir);
-        buildReactFlowGraph(ir);
-        setSvgSchematic(generateMockSvg(ir));
-        setActiveTab("overview");
-      }
-    } catch (e) {
-      console.error("Error loading example", e);
+      if (!res.ok) return;
+
+      const ir = await res.json();
+      setProjectIR(ir);
+      setMermaidCode(pipelineMermaidCode);
+      setSvgSchematic(generateMockSvg(ir));
+      buildReactFlowGraph(ir);
+      setActiveTab("overview");
+    } catch (error) {
+      console.error("Error loading example", error);
     } finally {
       setIsLoading(false);
     }
   };
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const example = params.get("example");
+    const tab = normalizeTab(params.get("tab"));
+    if (!example) {
+      if (tab) setActiveTab(tab);
+      return;
+    }
+
+    const filename = example.endsWith(".json") ? example : `${example}.json`;
+    loadExample(filename).then(() => {
+      if (tab) setActiveTab(tab);
+    });
+  }, []);
+
   const generateMockSvg = (ir: any): string => {
     const components = ir.components || [];
-    const mcu = components.find((component: any) => component.category?.toLowerCase() === "microcontroller") || components[0];
-    const inputs = components.filter((component: any) => ["sensor", "power"].includes(component.category?.toLowerCase())).slice(0, 2);
-    const outputs = components.filter((component: any) => ["actuator", "display", "passives"].includes(component.category?.toLowerCase())).slice(0, 3);
-    const inputA = inputs[0]?.name || "Input Module";
-    const inputB = inputs[1]?.name || "Power Rail";
-    const outputA = outputs[0]?.name || "Output Module";
-    const outputB = outputs[1]?.name || "Display / Actuator";
-    const outputC = outputs[2]?.name || "Status Output";
+    const controller =
+      components.find((component: any) => component.category?.toLowerCase() === "microcontroller") || components[0];
+    const inputs = components
+      .filter((component: any) => ["sensor", "power"].includes(component.category?.toLowerCase()))
+      .slice(0, 2);
+    const outputs = components
+      .filter((component: any) => ["actuator", "display", "passives"].includes(component.category?.toLowerCase()))
+      .slice(0, 3);
 
-    return `<svg viewBox="0 0 800 380" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-      <rect width="100%" height="100%" fill="#0b0d19" stroke="#1e293b" stroke-width="2"/>
-      <g stroke="#1e293b" stroke-width="1">
-        <line x1="0" y1="40" x2="800" y2="40" stroke-dasharray="5 5" />
-        <line x1="0" y1="120" x2="800" y2="120" stroke-dasharray="5 5" />
-        <line x1="0" y1="200" x2="800" y2="200" stroke-dasharray="5 5" />
-        <line x1="0" y1="280" x2="800" y2="280" stroke-dasharray="5 5" />
-        <line x1="160" y1="0" x2="160" y2="380" stroke-dasharray="5 5" />
-        <line x1="400" y1="0" x2="400" y2="380" stroke-dasharray="5 5" />
-        <line x1="640" y1="0" x2="640" y2="380" stroke-dasharray="5 5" />
+    return `<svg viewBox="0 0 880 420" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+      <rect width="880" height="420" fill="#141519"/>
+      <g stroke="#2a2d35" stroke-width="1">
+        <path d="M40 80 H840"/><path d="M40 180 H840"/><path d="M40 280 H840"/>
+        <path d="M180 40 V380"/><path d="M440 40 V380"/><path d="M700 40 V380"/>
       </g>
-      <text x="30" y="30" font-family="monospace" font-size="12" font-weight="bold" fill="#00d2ff">CAD ELECTRICAL WIRE-GRID SCHEMATIC</text>
-      
-      <!-- MCU node -->
-      <rect x="300" y="100" width="200" height="180" rx="8" fill="#0e1324" stroke="#00d2ff" stroke-width="2" filter="drop-shadow(0 0 8px rgba(0,210,255,0.2))"/>
-      <text x="400" y="130" font-family="monospace" font-size="12" font-weight="bold" fill="#ffffff" text-anchor="middle">MAIN CONTROLLER</text>
-      <text x="400" y="150" font-family="monospace" font-size="10" fill="#00d2ff" text-anchor="middle">${mcu?.part_number || "Controller"}</text>
-      
-      <!-- Inputs left -->
-      <rect x="50" y="80" width="130" height="80" rx="6" fill="#0e1324" stroke="#10b981" stroke-width="1.5" />
-      <text x="115" y="115" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">INPUT</text>
-      <text x="115" y="135" font-family="monospace" font-size="9" fill="#10b981" text-anchor="middle">${inputA.slice(0, 18)}</text>
-      <path d="M 180 120 L 300 150" fill="none" stroke="#10b981" stroke-width="1.5" />
-
-      <rect x="50" y="200" width="130" height="80" rx="6" fill="#0e1324" stroke="#f59e0b" stroke-width="1.5" />
-      <text x="115" y="235" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">POWER</text>
-      <text x="115" y="255" font-family="monospace" font-size="9" fill="#f59e0b" text-anchor="middle">${inputB.slice(0, 18)}</text>
-      <path d="M 180 240 L 300 240" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 5" />
-
-      <!-- Outputs right -->
-      <rect x="620" y="70" width="130" height="80" rx="6" fill="#0e1324" stroke="#d946ef" stroke-width="1.5" />
-      <text x="685" y="105" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">OUTPUT</text>
-      <text x="685" y="125" font-family="monospace" font-size="9" fill="#d946ef" text-anchor="middle">${outputA.slice(0, 18)}</text>
-      <path d="M 500 160 L 620 110" fill="none" stroke="#d946ef" stroke-width="1.5" />
-
-      <rect x="620" y="180" width="130" height="80" rx="6" fill="#0e1324" stroke="#a855f7" stroke-width="1.5" />
-      <text x="685" y="215" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">MODULE</text>
-      <text x="685" y="235" font-family="monospace" font-size="9" fill="#a855f7" text-anchor="middle">${outputB.slice(0, 18)}</text>
-      <path d="M 500 220 L 620 220" fill="none" stroke="#a855f7" stroke-width="1.5" />
-
-      <rect x="620" y="290" width="130" height="60" rx="6" fill="#0e1324" stroke="#94a3b8" stroke-width="1.5" />
-      <text x="685" y="325" font-family="monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">${outputC.slice(0, 18)}</text>
-      <path d="M 750 220 L 750 320 L 685 320" fill="none" stroke="#a855f7" stroke-width="1" />
+      <text x="44" y="42" font-family="monospace" font-size="14" font-weight="700" fill="#ffffff">BLUEPRINT WIRING DIAGRAM</text>
+      <text x="44" y="64" font-family="monospace" font-size="11" fill="#8b8e99">Generated from validated Hardware IR</text>
+      <rect x="330" y="116" width="220" height="188" fill="#111216" stroke="#22d3ee" stroke-width="2"/>
+      <text x="440" y="154" font-family="monospace" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">MAIN CONTROLLER</text>
+      <text x="440" y="177" font-family="monospace" font-size="12" fill="#22d3ee" text-anchor="middle">${controller?.part_number || "Controller"}</text>
+      <rect x="60" y="92" width="170" height="86" fill="#111216" stroke="#34d399" stroke-width="1.5"/>
+      <text x="145" y="127" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">INPUT</text>
+      <text x="145" y="149" font-family="monospace" font-size="11" fill="#34d399" text-anchor="middle">${(inputs[0]?.name || "Sensor input").slice(0, 23)}</text>
+      <path d="M230 135 C270 135 286 162 330 164" fill="none" stroke="#34d399" stroke-width="2"/>
+      <rect x="60" y="228" width="170" height="86" fill="#111216" stroke="#facc15" stroke-width="1.5"/>
+      <text x="145" y="263" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">POWER</text>
+      <text x="145" y="285" font-family="monospace" font-size="11" fill="#facc15" text-anchor="middle">${(inputs[1]?.name || "Power rail").slice(0, 23)}</text>
+      <path d="M230 271 H330" fill="none" stroke="#facc15" stroke-width="2" stroke-dasharray="7 7"/>
+      <rect x="650" y="76" width="170" height="86" fill="#111216" stroke="#a78bfa" stroke-width="1.5"/>
+      <text x="735" y="111" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">OUTPUT</text>
+      <text x="735" y="133" font-family="monospace" font-size="11" fill="#a78bfa" text-anchor="middle">${(outputs[0]?.name || "Output module").slice(0, 23)}</text>
+      <path d="M550 166 C596 150 605 120 650 119" fill="none" stroke="#a78bfa" stroke-width="2"/>
+      <rect x="650" y="196" width="170" height="86" fill="#111216" stroke="#ec4899" stroke-width="1.5"/>
+      <text x="735" y="231" font-family="monospace" font-size="12" font-weight="700" fill="#ffffff" text-anchor="middle">MODULE</text>
+      <text x="735" y="253" font-family="monospace" font-size="11" fill="#ec4899" text-anchor="middle">${(outputs[1]?.name || "Display").slice(0, 23)}</text>
+      <path d="M550 231 H650" fill="none" stroke="#ec4899" stroke-width="2"/>
     </svg>`;
   };
 
-  // Generates offline high fidelity fallback structures
-  const runMockCompilation = async (userPrompt: string): Promise<any> => {
+  const runMockCompilation = async (userPrompt: string, imageData?: string | null): Promise<any> => {
     const promptLower = userPrompt.toLowerCase();
     let file = "biometric_deadbolt.json";
-    
-    if (promptLower.includes("water") || promptLower.includes("plant") || promptLower.includes("soil") || promptLower.includes("garden")) {
+
+    if (
+      imageData ||
+      promptLower.includes("mp3") ||
+      promptLower.includes("audio") ||
+      promptLower.includes("music") ||
+      promptLower.includes("player") ||
+      promptLower.includes("pocket")
+    ) {
+      file = "pocket_mp3_player.json";
+    } else if (promptLower.includes("water") || promptLower.includes("plant") || promptLower.includes("soil") || promptLower.includes("garden")) {
       file = "plant_watering.json";
     } else if (promptLower.includes("thermostat") || promptLower.includes("temperature") || promptLower.includes("weather")) {
       file = "smart_thermostat.json";
-    } else {
-      file = "biometric_deadbolt.json";
     }
 
     const res = await fetch(`/examples/${file}`);
     const ir = await res.json();
+    ir.assembly_metadata = {
+      ...(ir.assembly_metadata || {}),
+      reference_image_data: imageData || ir.assembly_metadata?.reference_image_data || null,
+      input_mode: imageData ? "prompt_image" : "prompt",
+      image_features: ir.assembly_metadata?.image_features || ir.constraints || [],
+    };
     return {
       project_ir: ir,
-      mermaid_code: `graph LR;\n  SEN1[Sensor] -->|Signal| U1[${ir.components[0].part_number}];\n  U1 -->|Command| ACT1[Actuator];`,
-      svg_schematic: generateMockSvg(ir)
+      mermaid_code: pipelineMermaidCode,
+      svg_schematic: generateMockSvg(ir),
     };
   };
 
-  // Helper to load old project
-  const loadOldProject = async (projId: string) => {
+  const loadOldProject = async (projectId: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/projects/${projId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setProjectIR(data.project_ir);
-        setMermaidCode(data.mermaid_code);
-        setSvgSchematic(data.svg_schematic);
-        buildReactFlowGraph(data.project_ir);
-        setActiveTab("overview");
-      }
-    } catch (e) {
-      console.error(e);
+      const res = await fetch(`${API_URL}/api/projects/${projectId}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setProjectIR(data.project_ir);
+      setMermaidCode(data.mermaid_code);
+      setSvgSchematic(data.svg_schematic);
+      buildReactFlowGraph(data.project_ir);
+      setActiveTab("overview");
+    } catch (error) {
+      console.error(error);
     } finally {
       setIsLoading(false);
     }
@@ -450,931 +622,847 @@ export default function Home() {
     const blob = new Blob([jsonStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
+    const title = projectIR.overview?.title || "blueprint_project";
     link.href = url;
-    link.download = `${projectIR.overview.title.toLowerCase().replace(/\s+/g, "_")}_blueprint.json`;
+    link.download = `${title.toLowerCase().replace(/\s+/g, "_")}_blueprint.json`;
     link.click();
     URL.revokeObjectURL(url);
   };
 
-  // Calculate numbers dynamically for the summary table.
   const getOverviewMetrics = () => {
-    if (!projectIR || !projectIR.components) return { electricalParts: 0, mechanicalParts: 0, totalParts: 0, electricalCost: 0, mechanicalCost: 0, totalCost: 0 };
-    
-    let elParts = 0;
-    let mechParts = 0;
-    let elCost = 0;
-    let mechCost = 0;
+    if (!projectIR?.components) {
+      return { electricalParts: 0, mechanicalParts: 0, totalParts: 0, electricalCost: 0, mechanicalCost: 0, totalCost: 0 };
+    }
 
-    projectIR.components.forEach((c: any) => {
-      const cat = c.category?.toLowerCase() || "";
-      if (["mechanical", "3d print"].includes(cat)) {
-        mechParts += c.quantity || 1;
-        mechCost += (c.unit_price || 0) * (c.quantity || 1);
+    let electricalParts = 0;
+    let mechanicalParts = 0;
+    let electricalCost = 0;
+    let mechanicalCost = 0;
+
+    projectIR.components.forEach((component: any) => {
+      const category = component.category?.toLowerCase() || "";
+      const quantity = component.quantity || 1;
+      const unitPrice = component.unit_price || 0;
+
+      if (["mechanical", "3d print"].includes(category)) {
+        mechanicalParts += quantity;
+        mechanicalCost += unitPrice * quantity;
       } else {
-        elParts += c.quantity || 1;
-        elCost += (c.unit_price || 0) * (c.quantity || 1);
+        electricalParts += quantity;
+        electricalCost += unitPrice * quantity;
       }
     });
 
     return {
-      electricalParts: elParts,
-      mechanicalParts: mechParts,
-      totalParts: elParts + mechParts,
-      electricalCost: parseFloat(elCost.toFixed(2)),
-      mechanicalCost: parseFloat(mechCost.toFixed(2)),
-      totalCost: parseFloat((elCost + mechCost).toFixed(2))
+      electricalParts,
+      mechanicalParts,
+      totalParts: electricalParts + mechanicalParts,
+      electricalCost: Number(electricalCost.toFixed(2)),
+      mechanicalCost: Number(mechanicalCost.toFixed(2)),
+      totalCost: Number((electricalCost + mechanicalCost).toFixed(2)),
     };
   };
 
   const metrics = getOverviewMetrics();
-
-  // Helper to resolve custom category colored icons for the parts list sidebar.
-  const getSidebarPartIcon = (category: string) => {
-    const cat = category.toLowerCase();
-    if (cat === "microcontroller") {
-      return { icon: <Cpu className="w-4.5 h-4.5" />, color: "text-cyan-400 bg-cyan-950/60 border-cyan-500/20" };
-    } else if (cat === "sensor") {
-      return { icon: <Database className="w-4.5 h-4.5" />, color: "text-purple-400 bg-purple-950/60 border-purple-500/20" };
-    } else if (cat === "power") {
-      return { icon: <Battery className="w-4.5 h-4.5" />, color: "text-yellow-400 bg-yellow-950/60 border-yellow-500/20" };
-    } else if (cat === "display") {
-      return { icon: <Monitor className="w-4.5 h-4.5" />, color: "text-pink-400 bg-pink-950/60 border-pink-500/20" };
-    } else if (cat === "actuator") {
-      // Small speaker or headphone output
-      return { icon: <Volume2 className="w-4.5 h-4.5" />, color: "text-orange-400 bg-orange-950/60 border-orange-500/20" };
-    } else if (cat === "passives") {
-      return { icon: <Sliders className="w-4.5 h-4.5" />, color: "text-purple-400 bg-purple-950/60 border-purple-500/20" };
-    } else if (cat === "mechanical") {
-      return { icon: <Wrench className="w-4.5 h-4.5" />, color: "text-red-400 bg-red-950/60 border-red-500/20" };
-    } else {
-      return { icon: <Printer className="w-4.5 h-4.5" />, color: "text-blue-400 bg-blue-950/60 border-blue-500/20" };
-    }
-  };
-
-  const samplePrompts = [
-    "ESP32 greenhouse monitor with OLED screen and battery power",
-    "Arduino LED wearable with button controls and 3D printed clip",
-    "Low-voltage relay controller for a small DC pump"
+  const components = projectIR?.components || [];
+  const assembly = projectIR?.assembly || [];
+  const constraints = projectIR?.constraints || [];
+  const imageFeatures = projectIR?.assembly_metadata?.image_features?.length
+    ? projectIR.assembly_metadata.image_features
+    : constraints;
+  const issues = [
+    ...(projectIR?.validation?.critical || []),
+    ...(projectIR?.validation?.warning || []),
+    ...(projectIR?.validation?.info || []),
+    ...(projectIR?.validation_issues || []),
   ];
+  const projectTitle = projectIR?.overview?.title || "Untitled Hardware Project";
+  const projectDescription = projectIR?.overview?.description || "Generated hardware package";
+  const projectImage = projectIR?.assembly_metadata?.reference_image_data || null;
 
-  return (
-    <div className="min-h-screen flex flex-col bg-[#070913] text-slate-100 font-mono antialiased overflow-hidden">
-      
-      {/* 🚀 HEADER SECTION */}
-      <header className="sticky top-0 z-40 bg-[#0b0d19]/95 backdrop-blur-md border-b border-slate-800/80 px-6 py-3.5 flex justify-between items-center shadow-lg shadow-black/10">
-        <div className="flex items-center space-x-3.5">
-          <div className="p-2 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-500/20 ring-1 ring-blue-400/30">
-            <Cpu className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-md font-black tracking-widest text-white uppercase flex items-center space-x-1.5">
-              <span>BLUEPRINT</span>
-              <span className="text-[9px] bg-blue-500/15 border border-blue-500/30 text-blue-400 px-1.5 py-0.5 rounded font-bold font-mono tracking-normal normal-case">open-source</span>
-            </h1>
-            <p className="text-[8px] uppercase tracking-widest font-extrabold text-slate-500">AI Hardware Compiler & CAD Terminal</p>
-          </div>
-        </div>
-
-        {/* Preset Instant Loaders */}
-        <div className="flex items-center space-x-4">
-          <div className="hidden md:flex items-center space-x-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800">
-            <span className="text-[8px] font-black text-slate-500 uppercase px-2">Presets:</span>
-            <button
-              onClick={() => loadExample("plant_watering.json")}
-              className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg hover:bg-[#1a2035] text-slate-300 hover:text-white transition-all font-mono"
-            >
-              🌱 Watering
+  if (!projectIR) {
+    return (
+      <div className="min-h-screen bg-[#141519] font-sans text-slate-100">
+        <header className="border-b border-[#292b31] bg-[#141519]/95">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+            <button type="button" onClick={() => setProjectIR(null)} className="text-left">
+              <span className="flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center border border-[#2c2f37] bg-black text-white">
+                  <Cpu className="h-4 w-4" />
+                </span>
+                <span className="block text-sm font-black uppercase tracking-[0.22em] text-white">Blueprint</span>
+              </span>
             </button>
-            <button
-              onClick={() => loadExample("smart_thermostat.json")}
-              className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg hover:bg-[#1a2035] text-slate-300 hover:text-white transition-all font-mono"
-            >
-              🌡️ Thermostat
-            </button>
-            <button
-              onClick={() => loadExample("biometric_deadbolt.json")}
-              className="text-[10px] font-extrabold px-2.5 py-1.5 rounded-lg hover:bg-[#1a2035] text-slate-300 hover:text-white transition-all font-mono"
-            >
-              🔒 Deadbolt
-            </button>
-          </div>
+            <div className="flex items-center gap-2">
+              <span className={`hidden border px-3 py-1.5 text-xs font-semibold sm:block ${
+                serverStatus === "connected"
+                  ? "border-emerald-500/30 bg-emerald-950/30 text-emerald-400"
+                  : "border-amber-500/30 bg-amber-950/30 text-amber-400"
+              }`}>
+                {serverStatus === "connected" ? "API connected" : "Demo mode"}
+              </span>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowHeaderRecent((s) => !s)}
+                  className="inline-flex items-center gap-2 border border-[#2c2f37] px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-white hover:text-black"
+                >
+                  <History className="h-4 w-4 text-slate-300" />
+                  Recent projects
+                </button>
 
-          {/* Connection Status Badge */}
-          <div className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full border text-[9px] font-black uppercase tracking-wider font-mono ${
-            serverStatus === "connected" 
-              ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/20" 
-              : "bg-amber-950/40 text-amber-400 border-amber-500/20"
-          }`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${serverStatus === "connected" ? "bg-emerald-400 animate-pulse" : "bg-amber-400 tech-pulse"}`} />
-            <span>{serverStatus === "connected" ? "Core Connected" : "Local Simulation"}</span>
-          </div>
-        </div>
-      </header>
-
-      {/* WORKSPACE AREA */}
-      <main className="flex-1 flex flex-col xl:flex-row p-4 gap-4 h-[calc(100vh-68px)] overflow-hidden">
-        
-        {/* LEFT COMPILER PANEL (350px) */}
-        <section className={`${!projectIR ? "hidden" : "flex"} w-full xl:w-[340px] flex-col space-y-4 h-full overflow-y-auto pr-1 flex-shrink-0`}>
-          {projectIR ? (
-            <>
-              <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-4">
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  <Info className="w-4 h-4 text-blue-400" />
-                  <span>About Project</span>
-                </div>
-                <div className="space-y-3">
-                  <h2 className="text-sm font-black tracking-wider text-white uppercase">{projectIR.overview?.title}</h2>
-                  <p className="text-[10px] leading-relaxed text-slate-400">{projectIR.overview?.description}</p>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {(projectIR.constraints || []).slice(0, 8).map((tag: string) => (
-                    <span key={tag} className="text-[7px] font-black uppercase tracking-wider px-2 py-1 rounded border border-slate-800 bg-slate-950 text-slate-400">
-                      {tag.split(":")[0]}
-                    </span>
-                  ))}
-                </div>
-                <div className="border border-slate-800 rounded-xl overflow-hidden">
-                  <div className="grid grid-cols-3 bg-slate-950 text-[8px] text-slate-500 uppercase font-black">
-                    <span className="p-2">Category</span>
-                    <span className="p-2 text-center">Parts</span>
-                    <span className="p-2 text-right">Cost</span>
+                {showHeaderRecent && (
+                  <div className="absolute right-0 mt-2 w-64 rounded border border-[#2c2f37] bg-[#17181d] p-2 text-sm">
+                    {projectHistory.length > 0 ? (
+                      <div className="space-y-1">
+                        {projectHistory.slice(0, 4).map((proj: any) => (
+                          <button
+                            key={proj.project_id}
+                            type="button"
+                            onClick={() => {
+                              setShowHeaderRecent(false);
+                              loadOldProject(proj.project_id);
+                            }}
+                            className="w-full text-left px-2 py-2 hover:bg-black/30"
+                          >
+                            <div className="truncate font-semibold text-white">{proj.title || proj.prompt || "Untitled"}</div>
+                            <div className="truncate text-xs text-slate-500">{(proj.prompt || "").slice(0, 60)}</div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 p-2">No recent projects</div>
+                    )}
                   </div>
-                  <div className="grid grid-cols-3 text-[10px] border-t border-slate-800">
-                    <span className="p-2 text-slate-300">Electrical</span>
-                    <span className="p-2 text-center text-slate-300">{metrics.electricalParts}</span>
-                    <span className="p-2 text-right text-emerald-400">${metrics.electricalCost.toFixed(2)}</span>
-                  </div>
-                  <div className="grid grid-cols-3 text-[10px] border-t border-slate-800">
-                    <span className="p-2 text-slate-300">Mechanical</span>
-                    <span className="p-2 text-center text-slate-300">{metrics.mechanicalParts}</span>
-                    <span className="p-2 text-right text-emerald-400">${metrics.mechanicalCost.toFixed(2)}</span>
-                  </div>
-                  <div className="grid grid-cols-3 text-[10px] border-t border-slate-800 bg-slate-950/50 font-black">
-                    <span className="p-2 text-white">Total</span>
-                    <span className="p-2 text-center text-white">{metrics.totalParts}</span>
-                    <span className="p-2 text-right text-emerald-400">${metrics.totalCost.toFixed(2)}</span>
-                  </div>
-                </div>
+                )}
               </div>
-            </>
-          ) : (
-            <>
-          
-          {/* Main prompt compiling form */}
-          <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl space-y-4">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-2">
-              <Sparkles className="w-4 h-4 text-blue-400" />
-              <span>COMPILE DESIGN</span>
-            </h3>
-            <form onSubmit={handleGenerate} className="space-y-3">
+            </div>
+          </div>
+        </header>
+
+        <main className="mx-auto max-w-6xl px-5 py-12">
+            <section className="mx-auto max-w-3xl text-center">
+            <p className="text-sm font-medium text-slate-500">Shack 15</p>
+            <h1 className="mt-4 text-4xl font-semibold leading-tight text-white sm:text-6xl">
+              Turn an idea into a hardware plan.
+            </h1>
+            <p className="mx-auto mt-5 max-w-2xl text-base leading-7 text-slate-400">
+              Upload a photo, sketch, or short description. Get parts, wiring, cost, and build steps.
+            </p>
+
+            <form onSubmit={handleGenerate} className="mt-8 border border-[#2c2f37] bg-[#17181d] p-3 text-left shadow-2xl shadow-black/30">
               <div className="relative">
                 <textarea
                   value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
-                  placeholder="Describe a safe low-voltage electronics idea, such as an ESP32 sensor dashboard, Arduino motor controller, battery-powered LED wearable, or simple 3D-printable enclosure..."
-                  className="w-full h-28 p-3 pb-9 text-[11px] bg-[#070913] border border-slate-800 rounded-xl focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all placeholder:text-slate-600 text-slate-200 leading-normal"
+                  onChange={(event) => setPrompt(event.target.value)}
+                  placeholder="Describe what you want to build, or upload an image."
+                  className="min-h-[138px] w-full resize-none bg-transparent p-4 pr-16 pb-16 text-sm leading-7 text-slate-100 outline-none placeholder:text-slate-600"
                 />
-                <div className="absolute bottom-2 left-2 flex items-center gap-1.5">
-                  <input
-                    type="file"
-                    ref={fileInputRefSidebar}
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="hidden"
-                  />
+                <button
+                  type="submit"
+                  disabled={isLoading || (!prompt.trim() && !selectedImage)}
+                  className="absolute bottom-4 right-4 inline-flex h-10 w-10 items-center justify-center bg-white text-black transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  aria-label="Compile hardware"
+                  title="Compile hardware"
+                >
+                  {isLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                </button>
+              </div>
+              {selectedImage && (
+                <div className="mb-3 flex items-center gap-3 border border-[#2c2f37] bg-black/30 p-2">
+                  <img src={selectedImage} alt="Attached reference" className="h-16 w-24 object-cover" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-white">Image added</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Blueprint will use this image to understand the design.</div>
+                  </div>
+                  <button type="button" onClick={removeSelectedImage} className="p-2 text-slate-500 hover:text-white" aria-label="Remove image">
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
+              <div className="flex flex-col gap-3 border-t border-[#2c2f37] px-2 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <input ref={fileInputRefCenter} type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
                   <button
                     type="button"
-                    onClick={() => fileInputRefSidebar.current?.click()}
-                    className={`p-1 rounded hover:bg-slate-800 transition-all ${
-                      selectedImage ? "text-blue-400" : "text-slate-500"
-                    }`}
-                    title="Attach reference sketch/image (multimodal)"
+                    onClick={() => fileInputRefCenter.current?.click()}
+                    className="inline-flex h-10 w-10 items-center justify-center border border-[#2c2f37] text-slate-400 hover:bg-white hover:text-black"
+                    title="Add image"
                   >
-                    <Paperclip className="w-3.5 h-3.5" />
+                    <Paperclip className="h-4 w-4" />
                   </button>
                 </div>
               </div>
-
-              {selectedImage && (
-                <div className="relative w-16 h-16 rounded-lg border border-slate-800 bg-slate-950 overflow-hidden flex items-center justify-center group">
-                  <img src={selectedImage} alt="Reference sketch" className="object-cover w-full h-full" />
-                  <button
-                    type="button"
-                    onClick={removeSelectedImage}
-                    className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
-                  >
-                    <X className="w-4 h-4 text-red-400" />
-                  </button>
-                </div>
-              )}
-
-              <button
-                type="submit"
-                disabled={isLoading || !prompt.trim()}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-lg shadow-blue-500/10 flex items-center justify-center space-x-2 transition-all disabled:opacity-50 text-xs tracking-wider"
-              >
-                {isLoading ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Orchestrating Agents...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>COMPILE HARDWARE</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </>
-                )}
-              </button>
             </form>
-          </div>
 
-          {/* Seed inventory templates catalog */}
-          <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl flex-1 flex flex-col min-h-[180px] overflow-hidden">
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-2 mb-3">
-              <Database className="w-4 h-4 text-emerald-400" />
-              <span>PARTS SEED DATABASE</span>
-            </h3>
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-[10px]">
-              {catalogComponents.length > 0 ? (
-                catalogComponents.map((c: any) => (
-                  <div key={c.id || c.part_number} className="p-2.5 bg-[#070913] border border-slate-800/50 rounded-xl hover:border-slate-700 transition-all">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-extrabold text-slate-200 truncate max-w-[140px]">{c.name}</span>
-                      <span className="text-[8px] font-mono bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-800">{c.part_number}</span>
-                    </div>
-                    <p className="text-slate-500 text-[9px] line-clamp-1 mb-1">{c.description}</p>
-                    <div className="flex justify-between items-center text-[8px] font-semibold text-slate-500 mt-1.5">
-                      <span className="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded">{c.category.toUpperCase()}</span>
-                      <span className="text-emerald-400 font-mono">${c.price.toFixed(2)}</span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-8 text-slate-600">Loading catalog...</div>
-              )}
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              {samplePrompts.map((example) => (
+                <button
+                  key={example}
+                  type="button"
+                  onClick={() => setPrompt(example)}
+                  className="border border-[#2c2f37] bg-[#17181d] px-3 py-2 text-[11px] leading-5 text-slate-400 hover:border-slate-500 hover:text-white"
+                >
+                  {example}
+                </button>
+              ))}
             </div>
-          </div>
+          </section>
 
-          {/* Project compile history */}
-          {projectHistory.length > 0 && (
-            <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl max-h-[160px] flex flex-col overflow-hidden">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-2 mb-2">
-                <History className="w-4 h-4 text-slate-500" />
-                <span>COMPILED HISTORY</span>
-              </h3>
-              <div className="flex-1 overflow-y-auto space-y-1.5">
-                {projectHistory.map((p: any) => (
+          <section className="mt-12 grid gap-4 lg:grid-cols-[1.35fr_0.85fr]">
+            <div className="border border-[#2c2f37] bg-[#17181d] p-5">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-white">Examples</h2>
+                  <p className="mt-1 text-xs text-slate-500">Open a finished hardware plan.</p>
+                </div>
+                <span className="text-xs text-slate-500">More</span>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {communityProjects.map((project) => (
                   <button
-                    key={p.project_id}
-                    onClick={() => loadOldProject(p.project_id)}
-                    className="w-full p-2 text-left bg-[#070913] hover:bg-slate-900/40 border border-slate-800/50 rounded-lg flex justify-between items-center transition-all text-[10px]"
+                    key={project.file}
+                    type="button"
+                    onClick={() => loadExample(project.file)}
+                    className="group border border-[#2c2f37] bg-[#141519] p-4 text-left hover:border-slate-500"
                   >
-                    <div className="truncate max-w-[190px]">
-                      <div className="font-bold text-slate-300 truncate">{p.title}</div>
-                      <div className="text-[8px] text-slate-500 truncate">{p.prompt}</div>
+                    <div className="mb-4 flex h-10 w-10 items-center justify-center bg-black text-white">
+                      <Sparkles className="h-4 w-4" />
                     </div>
-                    <span className="text-[8px] text-blue-400 font-bold font-mono">{p.project_id}</span>
+                    <h3 className="text-sm font-semibold text-white">{project.title}</h3>
+                    <p className="mt-2 text-xs leading-6 text-slate-500">{project.description}</p>
+                    <span className="mt-4 inline-flex items-center gap-1 text-xs font-semibold text-white">
+                      Open project
+                      <ArrowRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+                    </span>
                   </button>
                 ))}
               </div>
             </div>
-          )}
-            </>
-          )}
-        </section>
-
-        {/* CENTER MAIN DESIGN CANVAS */}
-        <section className="flex-1 bg-[#0b0d19] border border-slate-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col h-full">
-          
-          {/* Navigation Workspace Tabs */}
-          {projectIR && (
-          <div className="bg-[#0f1123]/60 px-5 py-3 border-b border-slate-800/80 flex flex-wrap justify-between items-center gap-3">
-            <div className="flex space-x-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800/60">
-              <button
-                onClick={() => setActiveTab("overview")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "overview" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Overview</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("schematic")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "schematic" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>Schematic</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("svg")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "svg" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Vector view</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("bom")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "bom" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <ShoppingBag className="w-3.5 h-3.5" />
-                <span>BOM & SOURCING</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("assembly")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "assembly" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Wrench className="w-3.5 h-3.5" />
-                <span>Instructions</span>
-              </button>
-              <button
-                onClick={() => setActiveTab("mechanical")}
-                className={`text-[10px] font-black uppercase tracking-wider px-3.5 py-2 rounded-lg flex items-center space-x-1.5 transition-all ${
-                  activeTab === "mechanical" ? "bg-blue-600 text-white shadow-md shadow-blue-500/10" : "text-slate-400 hover:text-slate-200"
-                }`}
-              >
-                <Box className="w-3.5 h-3.5" />
-                <span>Mechanical</span>
-              </button>
-            </div>
-
-            {/* Export and Actions */}
-            {projectIR && (
-              <button
-                onClick={downloadJSONIR}
-                className="bg-slate-950 hover:bg-slate-900 border border-slate-800 text-white font-black px-4 py-2 rounded-xl text-[10px] tracking-wider uppercase flex items-center space-x-1.5 transition-all"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Export Package</span>
-              </button>
-            )}
-          </div>
-          )}
-
-          {/* Main Visualizer Window */}
-          <div className="flex-1 relative overflow-hidden bg-[#070913]">
-            {projectIR ? (
-              <>
-                {/* 1. Project overview hero */}
-                {activeTab === "overview" && (
-                  <div className="w-full h-full p-8 overflow-y-auto space-y-8">
-                    
-                    {/* Floating premium rendering at the top of landing */}
-                    <div className="w-full bg-[#0b0d19] border border-slate-800/80 rounded-2xl overflow-hidden p-6 relative shadow-lg">
-                      <div className="absolute top-4 right-4 bg-slate-950 px-2 py-1 rounded text-[8px] font-mono border border-slate-800 font-bold text-slate-500 uppercase tracking-widest flex items-center space-x-1">
-                        <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-ping mr-1" />
-                        <span>Interactive CAD Mockup Render</span>
-                      </div>
-                      
-                      <div className="h-52 flex items-center justify-center relative overflow-hidden">
-                        <div className="absolute inset-0 opacity-30" style={{
-                          backgroundImage: "linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px)",
-                          backgroundSize: "32px 32px",
-                          transform: "perspective(500px) rotateX(58deg) translateY(35px)"
-                        }} />
-                        <div className="w-80 h-36 bg-[#0e1324]/90 border border-slate-700 rounded-2xl relative shadow-2xl flex flex-col p-4 rotate-[-4deg]">
-                          <div className="flex justify-between items-center">
-                            <div className="text-[8px] text-cyan-400 font-black tracking-widest uppercase">{projectIR.overview.category} Project Package</div>
-                            <div className="flex gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-slate-600" />
-                              <span className="w-2 h-2 rounded-full bg-slate-600" />
-                              <span className="w-2 h-2 rounded-full bg-slate-600" />
-                            </div>
-                          </div>
-                          <div className="flex-1 mt-3 grid grid-cols-3 gap-2">
-                            <div className="rounded-lg border border-cyan-500/30 bg-cyan-950/20 flex items-center justify-center">
-                              <Cpu className="w-7 h-7 text-cyan-400" />
-                            </div>
-                            <div className="rounded-lg border border-purple-500/30 bg-purple-950/20 flex items-center justify-center">
-                              <Database className="w-7 h-7 text-purple-400" />
-                            </div>
-                            <div className="rounded-lg border border-amber-500/30 bg-amber-950/20 flex items-center justify-center">
-                              <Battery className="w-7 h-7 text-amber-400" />
-                            </div>
-                          </div>
-                          <div className="mt-3 flex items-center justify-between text-[7px] text-slate-500 uppercase tracking-widest">
-                            <span>Typed IR</span>
-                            <span>{projectIR.components.length} Parts</span>
-                            <span>{projectIR.nets.length} Nets</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Metadata header and constraint tags */}
-                    <div className="space-y-4">
-                      <div className="space-y-1">
-                        <h2 className="text-xl font-black text-white uppercase tracking-wider font-mono">{projectIR.overview.title}</h2>
-                        <div className="flex flex-wrap gap-2 pt-2">
-                          {/* Extract tags from IR constraints */}
-                          {projectIR.constraints && projectIR.constraints.map((tag: string, i: number) => {
-                            const cleanTag = tag.split(":")[0].replace(/\s+/g, " ").toUpperCase();
-                            return (
-                              <span key={i} className="text-[8px] font-black uppercase font-mono bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">
-                                {cleanTag}
-                              </span>
-                            );
-                          })}
-                          <span className="text-[8px] font-black uppercase font-mono bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">BUILDABLE PACKAGE</span>
-                          <span className="text-[8px] font-black uppercase font-mono bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">VALIDATED IR</span>
-                          <span className="text-[8px] font-black uppercase font-mono bg-slate-900 border border-slate-800 text-slate-400 px-2.5 py-1 rounded">LOW VOLTAGE</span>
-                        </div>
-                      </div>
-
-                      {/* Technical description */}
-                      <div className="space-y-2">
-                        <div className="text-[9px] uppercase tracking-widest font-extrabold text-slate-500">Technical Description</div>
-                        <p className="text-[11px] leading-relaxed text-slate-300 font-mono">{projectIR.overview.description}</p>
-                      </div>
-
-                      {/* Cost/part count summary table */}
-                      <div className="space-y-2 pt-4">
-                        <div className="text-[9px] uppercase tracking-widest font-extrabold text-slate-500">Project Sourcing Breakdown</div>
-                        <div className="bg-[#0b0d19] border border-slate-800/80 rounded-xl overflow-hidden max-w-lg">
-                          <table className="w-full text-left text-[10px] border-collapse">
-                            <thead>
-                              <tr className="bg-slate-900/60 border-b border-slate-800/80 text-slate-500 font-bold font-mono">
-                                <th className="py-2.5 px-4 uppercase">Category</th>
-                                <th className="py-2.5 px-4 uppercase text-center">Parts</th>
-                                <th className="py-2.5 px-4 uppercase text-right">Cost</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-800/50 font-mono">
-                              <tr className="hover:bg-slate-900/10">
-                                <td className="py-2.5 px-4 text-slate-300">Electrical</td>
-                                <td className="py-2.5 px-4 text-center text-slate-300">{metrics.electricalParts}</td>
-                                <td className="py-2.5 px-4 text-right text-emerald-400">${metrics.electricalCost.toFixed(2)}</td>
-                              </tr>
-                              <tr className="hover:bg-slate-900/10">
-                                <td className="py-2.5 px-4 text-slate-300">Mechanical</td>
-                                <td className="py-2.5 px-4 text-center text-slate-300">{metrics.mechanicalParts}</td>
-                                <td className="py-2.5 px-4 text-right text-emerald-400">${metrics.mechanicalCost.toFixed(2)}</td>
-                              </tr>
-                              <tr className="bg-slate-900/30 border-t border-slate-800/80 font-bold font-mono">
-                                <td className="py-3 px-4 text-white">Total</td>
-                                <td className="py-3 px-4 text-center text-white">{metrics.totalParts}</td>
-                                <td className="py-3 px-4 text-right text-emerald-400">${metrics.totalCost.toFixed(2)}</td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                )}
-
-                {/* 2. SCHEMATIC CANVAS TAB (React Flow) */}
-                {activeTab === "schematic" && (
-                  <div className="w-full h-full relative">
-                    <ReactFlow
-                      nodes={nodes}
-                      edges={edges}
-                      onNodesChange={onNodesChange}
-                      onEdgesChange={onEdgesChange}
-                      fitView
-                      fitViewOptions={{ padding: 0.15 }}
-                      className="bg-[#070913]"
-                    >
-                      <Background color="#1e293b" gap={20} size={1} />
-                      <Controls className="!bg-slate-950 !border !border-slate-800 !shadow-2xl !p-1 !text-white" />
-                      <MiniMap className="!bg-slate-950 !border !border-slate-800 !shadow-2xl !rounded-xl" nodeStrokeColor="#1e293b" nodeColor="#070913" maskColor="rgba(0,0,0,0.6)" />
-                    </ReactFlow>
-                  </div>
-                )}
-
-                {/* 3. SVG SCHEMATIC VIEW TAB */}
-                {activeTab === "svg" && (
-                  <div className="w-full h-full p-6 overflow-auto bg-[#070913] flex items-center justify-center">
-                    <div className="bg-[#0b0d19] border border-slate-800/80 p-8 rounded-3xl shadow-2xl max-w-4xl w-full" dangerouslySetInnerHTML={{ __html: svgSchematic }} />
-                  </div>
-                )}
-
-                {/* 4. BOM table */}
-                {activeTab === "bom" && (
-                  <div className="w-full h-full p-8 overflow-y-auto space-y-6">
-                    <div className="flex justify-between items-center border-b border-slate-800 pb-4">
-                      <div>
-                        <h2 className="text-md font-black text-white uppercase tracking-wider">Project Bill of Materials</h2>
-                        <p className="text-[10px] text-slate-500 mt-1">Sourcing inventory templates compiled by BOM Agent.</p>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-2xl font-black text-emerald-400 font-mono">${metrics.totalCost.toFixed(2)}</div>
-                        <div className="text-[8px] uppercase font-bold text-slate-500 tracking-wider">Total Project Cost</div>
-                      </div>
-                    </div>
-
-                    <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl overflow-hidden shadow-2xl">
-                      <table className="w-full text-left border-collapse text-[10px] font-mono">
-                        <thead>
-                          <tr className="bg-slate-950 text-slate-500 font-bold border-b border-slate-800">
-                            <th className="py-4 px-5">PART</th>
-                            <th className="py-4 px-5 text-center">QTY</th>
-                            <th className="py-4 px-5">UNIT</th>
-                            <th className="py-4 px-5">SOURCE</th>
-                            <th className="py-4 px-5 text-right">SUBTOTAL</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/40">
-                          {projectIR.components.map((c: any) => {
-                            const isMechanical = ["mechanical", "3d print"].includes(c.category.toLowerCase());
-                            return (
-                              <tr key={c.ref_des} className="hover:bg-slate-900/10 transition-colors">
-                                <td className="py-4 px-5 max-w-md">
-                                  <div className="flex items-start space-x-3">
-                                    <div className={`p-2 rounded-lg border flex-shrink-0 ${
-                                      isMechanical ? "bg-red-950/40 text-red-400 border-red-500/20" : "bg-blue-950/40 text-blue-400 border-blue-500/20"
-                                    }`}>
-                                      {isMechanical ? <Wrench className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
-                                    </div>
-                                    <div>
-                                      <div className="flex items-center space-x-2">
-                                        <span className="font-extrabold text-white text-xs">{c.name}</span>
-                                        <span className="text-[8px] font-bold bg-slate-950 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded">
-                                          {c.ref_des}
-                                        </span>
-                                      </div>
-                                      <div className="text-[9px] text-slate-500 mt-0.5">{c.part_number}</div>
-                                      <div className="text-[9px] text-slate-400 mt-1.5 leading-normal max-w-[280px] line-clamp-2">{c.rationale}</div>
-                                    </div>
-                                  </div>
-                                </td>
-                                <td className="py-4 px-5 text-center font-bold text-slate-300">{c.quantity}</td>
-                                <td className="py-4 px-5 text-slate-300">~${c.unit_price.toFixed(2)}</td>
-                                <td className="py-4 px-5">
-                                  <div className="flex flex-col gap-1">
-                                    <span className={`text-[9px] border px-2 py-0.5 rounded text-center max-w-[120px] ${
-                                      isMechanical
-                                        ? "bg-blue-950/40 text-blue-400 border-blue-500/20"
-                                        : "bg-emerald-950/30 text-emerald-400 border-emerald-500/20"
-                                    }`}>
-                                      {isMechanical ? "Fabricate" : "Seed Library"}
-                                    </span>
-                                    {c.sourcing_url && (
-                                      <span className="text-[8px] text-slate-500">datasheet/source available</span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-4 px-5 text-right font-bold text-emerald-400">~${(c.unit_price * c.quantity).toFixed(2)}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                {/* 5. ASSEMBLY GUIDE TAB */}
-                {activeTab === "assembly" && (
-                  <div className="w-full h-full p-8 overflow-y-auto space-y-6">
-                    <div>
-                      <h2 className="text-md font-black text-white uppercase tracking-wider">Chronological Build Instructions</h2>
-                      <p className="text-[10px] text-slate-500 mt-1">Order guidelines prepared sequentially from your circuit connections graph.</p>
-                    </div>
-
-                    <div className="space-y-4">
-                      {projectIR.assembly.map((step: any) => (
-                        <div key={step.step_num} className="bg-[#0b0d19] border border-slate-800/80 p-5 rounded-2xl shadow-xl flex gap-4">
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-950 text-blue-400 border border-blue-500/30 flex items-center justify-center font-extrabold text-xs">
-                            {step.step_num}
-                          </div>
-                          <div className="space-y-2 flex-1 font-mono text-[10px]">
-                            <h4 className="font-extrabold text-slate-200 text-xs">{step.title}</h4>
-                            <p className="text-slate-400 leading-relaxed">{step.description}</p>
-                            
-                            {/* Danger notification */}
-                            {step.danger_flag && (
-                              <div className="p-3 bg-red-950/30 border border-red-500/20 text-red-400 rounded-xl font-bold flex items-start space-x-2">
-                                <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                                <span>{step.danger_message || "Pay close attention to safety constraints during this stage!"}</span>
-                              </div>
-                            )}
-
-                            {/* Affected Components Badge */}
-                            {step.affected_components && step.affected_components.length > 0 && (
-                              <div className="flex items-center space-x-1.5 pt-1.5">
-                                <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">Target Parts:</span>
-                                {step.affected_components.map((part: string) => (
-                                  <span key={part} className="bg-slate-950 text-slate-400 font-mono text-[8px] font-bold px-2 py-0.5 rounded border border-slate-800">
-                                    {part}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* 6. Mechanical wireframe view */}
-                {activeTab === "mechanical" && (
-                  <div className="w-full h-full flex overflow-hidden">
-                    {/* Left internal CAD controls panel */}
-                    <div className="w-56 border-r border-slate-850 bg-[#0a0c18] p-5 flex flex-col space-y-5">
-                      <div>
-                        <h4 className="text-[9px] font-black uppercase text-slate-500 tracking-wider">3D CAD CONTROLS</h4>
-                        <div className="mt-2 text-[10px] font-bold text-slate-300">Workspace Layer Options</div>
-                      </div>
-                      
-                      {/* Interactive layer toggles */}
-                      <div className="space-y-2.5 text-[9px] font-bold">
-                        <button 
-                          onClick={() => setMechElectricalActive(!mechElectricalActive)}
-                          className={`w-full text-left py-1.5 px-3 rounded border flex justify-between items-center transition-all ${
-                            mechElectricalActive ? "bg-cyan-950/30 text-cyan-400 border-cyan-500/20" : "bg-slate-950 text-slate-600 border-slate-900"
-                          }`}
-                        >
-                          <span>❖ ELECTRICAL</span>
-                          <span className="text-[8px]">{mechElectricalActive ? "ON" : "OFF"}</span>
-                        </button>
-                        
-                        <div className="border-t border-slate-800/80 pt-3">
-                          <span className="text-[8px] text-slate-500 tracking-widest uppercase">MECHANICAL</span>
-                          <div className="mt-2 space-y-1.5">
-                            {Object.entries(mechToggles).map(([key, val]) => (
-                              <button
-                                key={key}
-                                onClick={() => setMechToggles({...mechToggles, [key]: !val})}
-                                className={`w-full text-left py-1.5 px-3 rounded border flex justify-between items-center transition-all ${
-                                  val ? "bg-slate-900 text-white border-slate-800" : "bg-slate-950 text-slate-600 border-slate-900"
-                                }`}
-                              >
-                                <span className="uppercase">☼ {key}</span>
-                                <span className="text-[7px]">{val ? "ACTIVE" : "HIDE"}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Translucent wireframe viewport with lines & labels calling out internal mounts */}
-                    <div className="flex-1 bg-slate-950/30 p-6 flex flex-col items-center justify-center relative overflow-hidden">
-                      <div className="absolute top-4 left-4 bg-slate-950 border border-slate-800 px-2.5 py-1.5 rounded-lg text-[8px] text-slate-400 font-bold uppercase tracking-wider flex items-center space-x-1.5">
-                        <span className="w-2 h-2 rounded bg-cyan-400" />
-                        <span>TRANS-AXIAL TRANSPARENT CHASSIS ASSEMBLY</span>
-                      </div>
-
-                      <div className="absolute inset-0 opacity-30" style={{
-                        backgroundImage: "linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px)",
-                        backgroundSize: "46px 46px",
-                        transform: "perspective(650px) rotateX(62deg) translateY(120px)"
-                      }} />
-                      <div className="relative w-96 h-56 mt-4 flex items-center justify-center">
-                        <div className="absolute w-80 h-36 border border-cyan-500/30 bg-cyan-950/5 rounded-lg flex flex-col justify-between p-2 transform rotate-12 skew-x-3 shadow-2xl relative">
-                          <span className="absolute w-2 h-2 bg-pink-500 rounded-full left-10 top-10" />
-                          <span className="absolute w-2 h-2 bg-cyan-500 rounded-full right-16 bottom-12" />
-                          <span className="absolute w-2 h-2 bg-yellow-500 rounded-full left-1/2 top-6" />
-                          <div className="absolute left-[-42px] top-1/2 transform -translate-y-1/2 text-[9px] font-bold text-cyan-400 font-mono">Y</div>
-                          <div className="absolute bottom-[-22px] left-1/2 transform -translate-x-1/2 text-[9px] font-bold text-cyan-400 font-mono">X</div>
-                          <div className="absolute right-[-42px] top-1/2 transform -translate-y-1/2 text-[9px] font-bold text-cyan-400 font-mono">Z</div>
-                        </div>
-
-                        <div className="absolute top-[-30px] left-8 border-l border-b border-dashed border-slate-500 pl-2 pb-1 text-[8px] text-slate-400 font-bold uppercase">
-                          Display / Sensor Mount
-                        </div>
-                        <div className="absolute top-[-5px] right-4 border-r border-b border-dashed border-slate-500 pr-2 pb-1 text-[8px] text-slate-400 font-bold uppercase">
-                          Main Controller Mount
-                        </div>
-                        <div className="absolute bottom-[0px] left-[-20px] border-l border-t border-dashed border-slate-500 pl-2 pt-1 text-[8px] text-slate-400 font-bold uppercase">
-                          Battery / Cable Routing
-                        </div>
-                        <div className="absolute bottom-[-15px] right-8 border-r border-t border-dashed border-slate-500 pr-2 pt-1 text-[8px] text-slate-400 font-bold uppercase">
-                          Enclosure Fasteners
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              </>
-            ) : (
-              <div className="w-full h-full bg-[#070913] text-slate-500 p-8 font-mono overflow-y-auto">
-                <div className="h-full min-h-[520px] border border-slate-800/80 rounded-3xl bg-[#0b0d19] relative overflow-hidden flex items-center justify-center">
-                  <div className="absolute inset-0 opacity-20" style={{
-                    backgroundImage: "linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px)",
-                    backgroundSize: "36px 36px"
-                  }} />
-                  <div className="relative max-w-3xl mx-auto text-center space-y-8 p-8">
-                    <div className="mx-auto w-20 h-20 rounded-2xl border border-blue-500/30 bg-blue-950/20 flex items-center justify-center shadow-2xl shadow-blue-950/30">
-                      <Cpu className="w-9 h-9 text-blue-400" />
-                    </div>
-                    <div className="space-y-3">
-                      <p className="text-[10px] uppercase tracking-[0.35em] text-blue-400 font-black">Prompt-to-Verifiable Hardware</p>
-                      <h2 className="text-2xl md:text-3xl font-black text-white uppercase tracking-wider">Describe a low-voltage build idea</h2>
-                      <p className="text-xs text-slate-400 leading-relaxed max-w-xl mx-auto">
-                        Blueprint compiles your idea into requirements, components, wiring nets, pin mappings, fabrication notes,
-                        assembly steps, and a typed JSON Hardware IR with validation checks.
-                      </p>
-                    </div>
-                    <form onSubmit={handleGenerate} className="max-w-2xl mx-auto w-full">
-                      <div className="bg-[#070913] border border-slate-800 rounded-2xl p-2 flex flex-col gap-2 shadow-2xl">
-                        <div className="flex items-end gap-2">
-                          <textarea
-                            value={prompt}
-                            onChange={(event) => setPrompt(event.target.value)}
-                            placeholder="Ask Blueprint to architect an ESP32 greenhouse monitor..."
-                            className="min-h-[76px] flex-1 resize-none bg-transparent p-3 text-xs text-slate-200 placeholder:text-slate-600 outline-none leading-relaxed"
-                          />
-                          <div className="flex items-center gap-2 pb-1.5 pr-1.5">
-                            <input
-                              type="file"
-                              ref={fileInputRefCenter}
-                              accept="image/*"
-                              onChange={handleImageChange}
-                              className="hidden"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => fileInputRefCenter.current?.click()}
-                              className={`p-2.5 rounded-xl hover:bg-slate-800 border border-slate-800 transition-all ${
-                                selectedImage ? "text-blue-400 border-blue-500/30" : "text-slate-500"
-                              }`}
-                              title="Attach reference sketch/image (multimodal)"
-                            >
-                              <Paperclip className="w-4 h-4" />
-                            </button>
-                            <button
-                              type="submit"
-                              disabled={isLoading || !prompt.trim()}
-                              className="h-11 w-11 rounded-xl bg-blue-600 text-white flex items-center justify-center disabled:opacity-40 hover:bg-blue-500 transition-all"
-                              aria-label="Generate hardware design"
-                            >
-                              {isLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                            </button>
-                          </div>
-                        </div>
-
-                        {selectedImage && (
-                          <div className="px-3 pb-2 flex items-center">
-                            <div className="relative w-20 h-20 rounded-xl border border-slate-800 bg-slate-950 overflow-hidden flex items-center justify-center group shadow-md">
-                              <img src={selectedImage} alt="Reference sketch" className="object-cover w-full h-full" />
-                              <button
-                                type="button"
-                                onClick={removeSelectedImage}
-                                className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white transition-opacity"
-                                title="Remove image"
-                              >
-                                <X className="w-5 h-5 text-red-400" />
-                              </button>
-                            </div>
-                            <div className="ml-3 text-left">
-                              <span className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider">multimodal input loaded</span>
-                              <span className="text-[9px] text-slate-500">Google Nano Banana will extract visual context.</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </form>
-                    <div className="grid md:grid-cols-3 gap-3 text-left">
-                      {[
-                        "ESP32 greenhouse monitor with OLED screen",
-                        "Arduino LED wearable with rechargeable battery",
-                        "Low-voltage relay controller in printed enclosure"
-                      ].map((example) => (
-                        <button
-                          key={example}
-                          onClick={() => setPrompt(example)}
-                          className="p-4 rounded-2xl border border-slate-800 bg-slate-950/50 hover:border-blue-500/40 hover:text-slate-200 transition-all text-[10px] leading-relaxed"
-                        >
-                          <span className="block text-blue-400 font-black uppercase tracking-widest mb-2">Example Prompt</span>
-                          {example}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2 text-[8px] uppercase tracking-widest font-black">
-                      <span className="px-2.5 py-1 rounded border border-slate-800 bg-slate-950">Arduino / ESP32</span>
-                      <span className="px-2.5 py-1 rounded border border-slate-800 bg-slate-950">Sensors</span>
-                      <span className="px-2.5 py-1 rounded border border-slate-800 bg-slate-950">Displays</span>
-                      <span className="px-2.5 py-1 rounded border border-slate-800 bg-slate-950">Simple Motors</span>
-                      <span className="px-2.5 py-1 rounded border border-red-900/60 bg-red-950/20 text-red-300">Blocks unsafe domains</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Right sidebar: parts list and safety audit */}
-        {projectIR && (
-          <section className="w-full xl:w-[320px] flex flex-col space-y-4 h-full overflow-y-auto flex-shrink-0">
             
-            {/* Parts list side panel */}
-            <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl flex-1 flex flex-col overflow-hidden max-h-[60%]">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-2 border-b border-slate-800 pb-3 mb-2.5">
-                <Box className="w-4 h-4 text-cyan-400" />
-                <span>PARTS LIST ({projectIR.components.length})</span>
-              </h3>
-              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 text-[9px] font-mono">
-                {projectIR.components.map((c: any, index: number) => {
-                  const deco = getSidebarPartIcon(c.category);
-                  return (
-                    <div key={index} className="p-2 bg-[#070913] border border-slate-800/55 rounded-lg flex items-center space-x-2.5 hover:border-slate-700 transition-all">
-                      <div className={`p-1.5 rounded-md border ${deco.color} flex-shrink-0`}>
-                        {deco.icon}
-                      </div>
-                      <div className="truncate flex-1">
-                        <div className="font-extrabold text-slate-200 truncate">{c.name}</div>
-                        <div className="text-[8px] text-slate-500 truncate mt-0.5">{c.part_number}</div>
-                      </div>
-                      <span className="text-[8px] bg-slate-900 border border-slate-800 text-slate-400 px-1 rounded font-bold font-mono">
-                        {c.ref_des}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* SAFETY AUDITOR SUMMARY PANEL */}
-            <div className="bg-[#0b0d19] border border-slate-800/80 rounded-2xl p-4 shadow-xl flex-1 flex flex-col overflow-hidden max-h-[40%]">
-              <h3 className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center space-x-2 border-b border-slate-800 pb-3 mb-2.5">
-                <ShieldCheck className="w-4 h-4 text-blue-400" />
-                <span>SAFETY AUDIT REPORT</span>
-              </h3>
-
-              {/* Status banner */}
-              {projectIR.is_valid ? (
-                <div className="p-2.5 bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-center space-x-2 mb-3 shadow">
-                  <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <div className="text-[8px] font-bold uppercase tracking-wider font-mono">
-                    Circuit Approved (Safe to Power)
-                  </div>
-                </div>
-              ) : (
-                <div className="p-2.5 bg-red-950/40 border border-red-500/20 text-red-400 rounded-xl flex items-center space-x-2 mb-3 shadow">
-                  <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                  <div className="text-[8px] font-bold uppercase tracking-wider font-mono">
-                    Safety Violations Detected
-                  </div>
-                </div>
-              )}
-
-              {/* Issue list */}
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-[9px] font-mono">
-                {(() => {
-                  const allIssues = [
-                    ...(projectIR.validation?.critical || []),
-                    ...(projectIR.validation?.warning || []),
-                    ...(projectIR.validation?.info || []),
-                    ...(projectIR.validation_issues || [])
-                  ];
-                  
-                  if (allIssues.length > 0) {
-                    return allIssues.map((issue: any, index: number) => {
-                      const isCritical = issue.severity === "CRITICAL" || issue.severity === "ERROR";
-                      const isWarning = issue.severity === "WARNING";
-                      
-                      let cardBg = "bg-blue-950/30 border-blue-500/10 text-slate-300";
-                      let badgeBg = "bg-blue-950 text-blue-400 border border-blue-500/25";
-                      if (isCritical) {
-                        cardBg = "bg-red-950/30 border-red-500/10 text-slate-300";
-                        badgeBg = "bg-red-950 text-red-400 border border-red-500/25";
-                      } else if (isWarning) {
-                        cardBg = "bg-amber-950/30 border-amber-500/10 text-slate-300";
-                        badgeBg = "bg-amber-950 text-amber-400 border border-amber-500/25";
-                      }
-
-                      return (
-                        <div key={index} className={`p-2.5 rounded-lg border shadow ${cardBg}`}>
-                          <div className="flex justify-between items-center mb-1">
-                            <span className={`text-[7px] font-extrabold px-1.5 py-0.5 rounded ${badgeBg}`}>
-                              {issue.severity}
-                            </span>
-                            <span className="font-extrabold text-[8px] text-slate-500 tracking-wider font-mono">{issue.category}</span>
-                          </div>
-                          <p className="font-bold text-[9px] leading-normal text-slate-200 mt-1">{issue.description}</p>
-                        </div>
-                      );
-                    });
-                  } else {
-                    return (
-              <div className="text-center py-6 text-slate-600 flex flex-col justify-center items-center space-y-2.5">
-                        <ShieldCheck className="w-7 h-7 stroke-[1.5] text-slate-700" />
-                        <span className="text-[8px] uppercase tracking-wider font-bold">All electrical nets validated safely.</span>
-                      </div>
-                    );
-                  }
-                })()}
-              </div>
-            </div>
-
           </section>
-        )}
-      </main>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-screen overflow-hidden bg-[#141519] text-slate-200">
+      <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <main className="flex min-h-0 min-w-0 flex-col">
+          <header className="relative flex min-h-[78px] items-center justify-center border-b border-[#282a30] bg-[#17181d] px-4">
+            <button
+              type="button"
+              onClick={() => setProjectIR(null)}
+              aria-label="Back to overview"
+              className="absolute left-4 hidden items-center gap-3 text-left md:flex"
+            >
+              <span className="flex h-9 w-9 items-center justify-center border border-[#30323a] bg-black text-white">
+                <Cpu className="h-4 w-4" />
+              </span>
+            </button>
+
+            <nav className="flex overflow-x-auto border border-[#2a2c33]">
+              {workspaceTabs.map((tab) => {
+                const Icon = tab.icon;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`inline-flex h-11 min-w-12 items-center justify-center gap-2 border-r border-[#2a2c33] px-4 text-xs font-black uppercase tracking-widest transition last:border-r-0 ${
+                      activeTab === tab.id ? "bg-white text-black" : "bg-[#17181d] text-slate-500 hover:text-white"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4" />
+                    <span className={activeTab === tab.id ? "inline" : "hidden sm:inline"}>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+
+          </header>
+
+          <section className="min-h-0 flex-1 overflow-hidden">
+            {activeTab === "overview" && (
+              <OverviewPanel
+                title={projectTitle}
+                description={projectDescription}
+                image={projectImage}
+                features={imageFeatures}
+                metrics={metrics}
+                metadata={projectIR.assembly_metadata || {}}
+              />
+            )}
+
+            {activeTab === "bom" && (
+              <BomPanel
+                components={components}
+                metrics={metrics}
+                cadSources={(projectIR.mechanical && Array.isArray(projectIR.mechanical.cad_sources)) ? projectIR.mechanical.cad_sources : []}
+                fabricationCost={Number(projectIR.mechanical?.fabrication_cost_estimate_usd || 0)}
+              />
+            )}
+
+            {activeTab === "mechanical" && (
+              <MechanicalPanel
+                toggles={mechToggles}
+                setToggles={setMechToggles}
+                electricalActive={mechElectricalActive}
+                setElectricalActive={setMechElectricalActive}
+                components={components}
+                features={imageFeatures}
+                metadata={projectIR.assembly_metadata || {}}
+                mechanical={projectIR.mechanical || {}}
+              />
+            )}
+
+            {activeTab === "schematic" && (
+              <div className="h-full min-h-[560px] bg-[#f7f7f5]">
+                <ReactFlow
+                  nodes={nodes}
+                  edges={edges}
+                  nodeTypes={schematicNodeTypes}
+                  onNodesChange={onNodesChange}
+                  onEdgesChange={onEdgesChange}
+                  fitView
+                  fitViewOptions={{ padding: 0.34 }}
+                  className="bg-[#f7f7f5]"
+                >
+                  <Background color="#e7e9ef" gap={22} size={1} />
+                  <Controls className="!border !border-[#d9dce3] !bg-white !text-[#202127]" />
+                  <MiniMap className="!border !border-[#d9dce3] !bg-white" nodeStrokeColor="#94a3b8" nodeColor="#f8fafc" maskColor="rgba(255,255,255,0.62)" />
+                  <SchematicLegend />
+                </ReactFlow>
+              </div>
+            )}
+
+            {activeTab === "assembly" && (
+              <AssemblyPanel assembly={assembly} issues={issues} onDownload={downloadJSONIR} />
+            )}
+
+            {activeTab === "svg" && (
+              <div className="h-full overflow-auto bg-[#141519] p-6">
+                <div className="mx-auto max-w-5xl border border-[#2a2c33] bg-[#17181d] p-5" dangerouslySetInnerHTML={{ __html: svgSchematic }} />
+              </div>
+            )}
+          </section>
+        </main>
+
+        <PartsSidebar components={components} issues={issues} isValid={projectIR.is_valid} />
+      </div>
     </div>
   );
+}
+
+function SchematicLegend() {
+  const nodeRows = [
+    ["MCU", schematicTones.microcontroller],
+    ["SENSOR", schematicTones.sensor],
+    ["ACTUATOR", schematicTones.actuator],
+    ["POWER", schematicTones.power],
+    ["MODULE", schematicTones.passives],
+    ["DISPLAY", schematicTones.display],
+  ] as const;
+
+  const wireRows = [
+    { label: "DATA", color: "#22c55e", dash: "none" },
+    { label: "POWER", color: "#f5a400", dash: "5 5" },
+    { label: "GROUND", color: "#94a3b8", dash: "8 6" },
+  ];
+
+  return (
+    <div className="pointer-events-none absolute bottom-5 left-5 z-10 w-[184px] border border-[#d9dce3] bg-white px-6 py-6 shadow-[0_18px_45px_rgba(15,23,42,0.14)]">
+      <div className="text-[21px] font-black uppercase tracking-[0.2em] text-[#202127]">Schematic</div>
+      <div className="mt-4 border-t border-[#d9dce3] pt-4 text-[12px] font-black uppercase tracking-[0.2em] text-[#777b86]">Node Types</div>
+      <div className="mt-4 space-y-3">
+        {nodeRows.map(([label, tone]) => (
+          <div key={label} className="flex items-center gap-3 text-[18px] font-black uppercase tracking-[0.08em]" style={{ color: tone.text }}>
+            <Eye className="h-4 w-4" />
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mt-5 border-t border-[#d9dce3] pt-4 space-y-3">
+        {wireRows.map((wire) => (
+          <div key={wire.label} className="flex items-center gap-3 text-[18px] font-black uppercase tracking-[0.08em]" style={{ color: wire.color }}>
+            <Eye className="h-4 w-4" />
+            <svg width="40" height="8" viewBox="0 0 40 8" aria-hidden="true">
+              <line x1="0" y1="4" x2="40" y2="4" stroke={wire.color} strokeWidth="3" strokeDasharray={wire.dash} />
+            </svg>
+            <span>{wire.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OverviewPanel({
+  title,
+  description,
+  image,
+  features,
+  metrics,
+  metadata,
+}: {
+  title: string;
+  description: string;
+  image: string | null;
+  features: string[];
+  metrics: ReturnType<typeof emptyMetrics>;
+  metadata: Record<string, any>;
+}) {
+  return (
+    <div className="h-full overflow-y-auto bg-[#141519] px-5 py-8">
+      <div className="mx-auto max-w-[890px]">
+        <div className="relative border border-[#2a2c33] bg-[#d5d5d3]">
+          {image ? (
+            <img src={image} alt="Uploaded hardware reference" className="h-[440px] w-full object-contain" />
+          ) : (
+            <ProductRender product={metadata.product_visual} />
+          )}
+          <button className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-blue-600 shadow-lg" title="Image captured from prompt">
+            <Eye className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="mt-6 border-t border-[#282a30] px-8 py-8">
+          <h1 className="text-2xl font-black uppercase tracking-[0.18em] text-white">{title}</h1>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {features.slice(0, 12).map((feature, index) => (
+              <span key={`${feature}-${index}`} className="border border-[#333640] px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">
+                {String(feature).split(":")[0]}
+              </span>
+            ))}
+          </div>
+
+          <div className="mt-7">
+            <div className="text-[11px] font-black uppercase tracking-[0.22em] text-slate-500">Technical Description</div>
+            <p className="mt-4 max-w-3xl text-base leading-8 text-slate-300">{description}</p>
+          </div>
+
+          <div className="mt-7 max-w-2xl border border-[#2a2c33]">
+            <div className="grid grid-cols-3 border-b border-[#2a2c33] px-4 py-3 text-[12px] font-black uppercase tracking-[0.18em] text-slate-500">
+              <span>Category</span>
+              <span className="text-center">Parts</span>
+              <span className="text-right">Cost</span>
+            </div>
+            <SummaryRow label="Electrical" parts={metrics.electricalParts} cost={metrics.electricalCost} />
+            <SummaryRow label="Mechanical" parts={metrics.mechanicalParts} cost={metrics.mechanicalCost} />
+            <SummaryRow label="Total" parts={metrics.totalParts} cost={metrics.totalCost} strong />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BomPanel({ components, metrics, cadSources = [], fabricationCost = 0 }: { components: any[]; metrics: ReturnType<typeof emptyMetrics>; cadSources?: any[]; fabricationCost?: number }) {
+  return (
+    <div className="h-full overflow-y-auto bg-[#141519] p-5">
+      <div className="border border-[#2a2c33]">
+        <div className="grid min-w-[980px] grid-cols-[minmax(420px,1fr)_110px_110px_150px_140px] border-b border-[#f5f5f5] px-5 py-5 text-sm font-black uppercase tracking-widest text-white">
+          <span>Part</span>
+          <span className="text-center">Qty</span>
+          <span>Unit</span>
+          <span>Source</span>
+          <span className="text-right">Subtotal</span>
+        </div>
+        <div className="min-w-[980px] divide-y divide-[#282a30]">
+          {components.map((component) => (
+            <div key={component.ref_des} className="grid grid-cols-[minmax(420px,1fr)_110px_110px_150px_140px] items-center px-5 py-6">
+              <div className="flex items-start gap-4">
+                <PartThumb component={component} />
+                <div className="min-w-0">
+                  <h3 className="text-lg font-black text-white">{component.name}</h3>
+                  <div className="mt-2 text-sm text-slate-500">{component.category}</div>
+                  <p className="mt-3 max-w-xl text-sm leading-6 text-slate-500">{component.rationale}</p>
+                  <CategoryBadge category={component.category} />
+                </div>
+              </div>
+              <div className="text-center text-base text-slate-200">{component.quantity}</div>
+              <div className="text-base text-slate-200">~${Number(component.unit_price || 0).toFixed(2)}</div>
+              <div className="flex flex-col items-start gap-2">
+                {getSourcesForComponent(component).map((source) => (
+                  <span key={source.label} className={`${source.className} inline-flex min-w-[86px] justify-center px-3 py-2 text-xs font-black italic text-black`}>
+                    {source.label}
+                  </span>
+                ))}
+              </div>
+              <div className="text-right text-lg font-black text-white">~${((component.unit_price || 0) * (component.quantity || 1)).toFixed(2)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-center justify-between border border-[#2a2c33] px-6 py-6">
+        <span className="text-sm font-black uppercase tracking-[0.22em] text-slate-400">Total Estimated Cost</span>
+        <span className="text-3xl font-black text-white">~${metrics.totalCost.toFixed(2)}</span>
+      </div>
+
+      <div className="mt-5 border border-[#2a2c33] p-4">
+        <div className="flex items-start justify-between gap-4 border-b border-[#333640] pb-3">
+          <div>
+            <h2 className="text-sm font-black uppercase tracking-widest text-white">CAD Sources</h2>
+            <div className="mt-2 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">3D Printed</div>
+          </div>
+          <div className="text-right">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Mech Cost</div>
+            <div className="mt-1 text-lg font-black text-white">~${fabricationCost.toFixed(2)}</div>
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {cadSources.length ? cadSources.slice(0, 3).map((source: any) => (
+            <a
+              key={`${source.name}-${source.url}`}
+              href={source.url}
+              target="_blank"
+              rel="noreferrer"
+              className="block border border-[#2a2c33] bg-[#141519] p-3 hover:border-cyan-400/60"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-black uppercase tracking-[0.14em] text-white">{source.name}</div>
+                  <div className="mt-2 text-[10px] font-black uppercase tracking-[0.16em] text-cyan-300">{source.source_type || "CAD"} / ${(Number(source.estimated_unit_price_usd || 0)).toFixed(2)}</div>
+                </div>
+                <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+              </div>
+              {source.file_formats?.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {source.file_formats.map((format: string) => (
+                    <span key={format} className="border border-[#333640] px-2 py-1 text-[10px] font-black uppercase text-slate-500">{format}</span>
+                  ))}
+                </div>
+              )}
+            </a>
+          )) : (
+            <div className="border border-[#2a2c33] bg-[#141519] p-3 text-xs leading-6 text-slate-500">
+              No CAD source records attached.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MechanicalPanel({
+  toggles,
+  setToggles,
+  electricalActive,
+  setElectricalActive,
+  components,
+  features,
+  metadata,
+  mechanical,
+}: {
+  toggles: Record<string, boolean>;
+  setToggles: (value: any) => void;
+  electricalActive: boolean;
+  setElectricalActive: (value: boolean) => void;
+  components: any[];
+  features: string[];
+  metadata: Record<string, any>;
+  mechanical: Record<string, any>;
+}) {
+  const dimensions = mechanical.render_dimensions || metadata.render_dimensions || { x_mm: 100, y_mm: 60, z_mm: 36 };
+  const placements = mechanical.component_placements || metadata.component_placements || [];
+  const relationships = mechanical.spatial_relationships || metadata.spatial_relationships || [];
+  const cadSources = Array.isArray(mechanical.cad_sources) ? mechanical.cad_sources : [];
+  const fabricationCost = Number(mechanical.fabrication_cost_estimate_usd || 0);
+
+  return (
+    <div className="relative h-full overflow-hidden bg-[#141519]">
+      <div className="absolute inset-0 opacity-90" style={{
+        backgroundImage:
+          "linear-gradient(#252933 1px, transparent 1px), linear-gradient(90deg, #252933 1px, transparent 1px)",
+        backgroundSize: "44px 44px",
+        transform: "perspective(760px) rotateX(62deg) translateY(130px)",
+        transformOrigin: "center 65%",
+      }} />
+
+      <div className="absolute left-6 top-1/2 z-20 w-36 -translate-y-1/2 border border-[#4b4d56] bg-[#17181d]/80 p-4">
+        <h2 className="border-b border-slate-400 pb-3 text-sm font-black uppercase tracking-widest text-white">3D CAD</h2>
+        <button
+          type="button"
+          onClick={() => setElectricalActive(!electricalActive)}
+          className={`mt-3 flex w-full items-center gap-2 border-b border-slate-500 pb-3 text-left text-xs font-black uppercase ${
+            electricalActive ? "text-cyan-400" : "text-slate-700"
+          }`}
+        >
+          <Cpu className="h-3 w-3" />
+          Electrical
+        </button>
+        <div className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-500">Mechanical</div>
+        <div className="mt-2 space-y-2">
+          {Object.entries(toggles).map(([key, value]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setToggles({ ...toggles, [key]: !value })}
+              className={`flex items-center gap-2 text-xs font-black uppercase ${
+                value ? layerColor(key) : "text-slate-700"
+              }`}
+            >
+              <Eye className="h-3 w-3" />
+              {key === "print" ? "3D Print" : key}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      
+
+      <div className="relative z-10 flex h-full items-center justify-center px-8">
+        <div className="relative h-[610px] w-[900px] max-w-full">
+          <MechanicalScene
+            dimensions={dimensions}
+            components={components}
+            placements={placements}
+            relationships={relationships}
+            features={features}
+            toggles={toggles}
+            electricalActive={electricalActive}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AssemblyPanel({ assembly, issues, onDownload }: { assembly: any[]; issues: any[]; onDownload: () => void }) {
+  return (
+    <div className="h-full overflow-y-auto bg-[#141519] p-6">
+      <div className="mb-6 flex items-center justify-between border-b border-[#2a2c33] pb-5">
+        <div>
+          <h2 className="text-xl font-black uppercase tracking-[0.18em] text-white">Build Instructions</h2>
+          <p className="mt-2 text-xs text-slate-500">Sequential assembly from the generated hardware graph.</p>
+        </div>
+        <button onClick={onDownload} className="flex items-center gap-2 border border-[#2a2c33] px-4 py-3 text-xs font-black uppercase tracking-widest text-white hover:bg-white hover:text-black">
+          <Download className="h-4 w-4" />
+          Export
+        </button>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <div className="space-y-4">
+          {assembly.map((step) => (
+            <section key={step.step_num} className="border border-[#2a2c33] bg-[#17181d] p-5">
+              <div className="flex gap-4">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center bg-white text-sm font-black text-black">
+                  {step.step_num}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-base font-black text-white">{step.title}</h3>
+                  <p className="mt-3 text-sm leading-7 text-slate-400">{step.description}</p>
+                  {step.danger_flag && (
+                    <div className="mt-4 flex gap-2 border border-rose-500/30 bg-rose-950/25 p-3 text-sm leading-6 text-rose-300">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{step.danger_message || "Pay close attention to safety constraints during this stage."}</span>
+                    </div>
+                  )}
+                  {step.affected_components?.length > 0 && (
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {step.affected_components.map((part: string) => (
+                        <span key={part} className="border border-[#2a2c33] px-2 py-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                          {part}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </section>
+          ))}
+        </div>
+
+        <div className="border border-[#2a2c33] bg-[#17181d] p-5">
+          <div className="mb-4 flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-cyan-400" />
+            <h3 className="text-sm font-black uppercase tracking-widest text-white">Safety Audit</h3>
+          </div>
+          {issues.length ? (
+            <div className="space-y-3">
+              {issues.map((issue, index) => (
+                <div key={`${issue.description}-${index}`} className="border border-[#2a2c33] bg-[#141519] p-3">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-slate-500">{issue.severity} / {issue.category}</div>
+                  <p className="mt-2 text-xs leading-6 text-slate-400">{issue.description}</p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="border border-emerald-500/30 bg-emerald-950/25 p-4 text-xs leading-6 text-emerald-300">
+              All electrical nets validated safely.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PartsSidebar({ components, issues, isValid }: { components: any[]; issues: any[]; isValid: boolean }) {
+  return (
+    <aside className="hidden min-h-0 border-l border-[#282a30] bg-[#17181d] xl:flex xl:flex-col">
+      <div className="border-b border-[#282a30] p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Box className="h-4 w-4 text-slate-500" />
+            <h2 className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">Parts List</h2>
+          </div>
+          <span className="border border-[#30323a] px-2 py-1 text-[10px] text-slate-500">{components.length}</span>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto px-4 py-4">
+        {components.map((component, index) => {
+          const tone = categoryTone[component.category?.toLowerCase()] || categoryTone.default;
+          const Icon = iconForCategory(component.category);
+          return (
+            <div key={`${component.ref_des}-${index}`} className="flex min-w-0 items-center gap-3 py-1.5">
+              <Icon className={`h-4 w-4 shrink-0 ${tone.text}`} />
+              <span className="truncate text-sm font-bold text-slate-300">{component.name}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="border-t border-[#282a30] p-4">
+        <div className={`flex items-center gap-2 border p-3 text-xs font-black uppercase tracking-widest ${
+          isValid ? "border-emerald-500/30 bg-emerald-950/20 text-emerald-300" : "border-rose-500/30 bg-rose-950/20 text-rose-300"
+        }`}>
+          {isValid ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+          {isValid ? "Circuit Approved" : `${issues.length} Issues`}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function ProductRender({ product }: { product?: string }) {
+  return (
+    <div className="relative flex h-[440px] items-center justify-center overflow-hidden bg-[#d5d5d3]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_45%_38%,rgba(255,255,255,0.88),rgba(210,210,208,0.35)_48%,rgba(185,185,182,0.55))]" />
+      <div className="relative h-64 w-[470px] rotate-[-16deg] skew-x-[-8deg] rounded-[34px] border border-black/20 bg-gradient-to-br from-[#6b6b68] via-[#3f403d] to-[#222321] shadow-2xl">
+        <div className="absolute left-9 top-8 h-48 w-[400px] rounded-[28px] border border-white/10 bg-gradient-to-br from-[#888884] via-[#4f504d] to-[#262725]" />
+        <div className="absolute right-14 top-10 h-28 w-44 rounded-xl border border-black/40 bg-[#0c0d10] shadow-inner">
+          <div className="absolute left-5 top-10 h-px w-32 bg-cyan-300/70 shadow-[12px_-10px_0_rgba(103,232,249,0.45),30px_12px_0_rgba(103,232,249,0.6),58px_-2px_0_rgba(103,232,249,0.5)]" />
+          <div className="absolute bottom-4 left-6 flex gap-5 text-white/60">
+            <span className="h-3 w-3 border-l-4 border-y-4 border-y-transparent" />
+            <span className="h-3 w-3 border-l-4 border-y-4 border-y-transparent" />
+            <span className="h-3 w-3 bg-white/60" />
+          </div>
+        </div>
+        <div className="absolute left-28 top-28 h-28 w-28 rounded-full border-[10px] border-[#222] bg-[#565653] shadow-inner">
+          <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full border border-black/40 bg-[#8a8a84]" />
+          <div className="absolute left-[42px] top-[38px] h-0 w-0 border-y-[12px] border-l-[18px] border-y-transparent border-l-[#4a4a48]" />
+        </div>
+        <span className="absolute left-20 top-24 h-9 w-9 rounded-full border border-black/40 bg-[#777771]" />
+        <span className="absolute left-[104px] top-42 h-8 w-8 rounded-full border border-black/40 bg-[#777771]" />
+        <span className="absolute right-5 top-32 h-12 w-3 rounded bg-black/50" />
+      </div>
+      <div className="absolute bottom-6 right-8 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
+        {product === "pocket_mp3_player" ? "Rendered from extracted MP3 player features" : "Generated visual reference"}
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, parts, cost, strong = false }: { label: string; parts: number; cost: number; strong?: boolean }) {
+  return (
+    <div className={`grid grid-cols-3 border-b border-[#2a2c33] px-4 py-3 text-base last:border-b-0 ${strong ? "font-black text-white" : "text-slate-300"}`}>
+      <span>{label}</span>
+      <span className="text-center">{parts}</span>
+      <span className="text-right">${cost.toFixed(2)}</span>
+    </div>
+  );
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  const tone = categoryTone[category?.toLowerCase()] || categoryTone.default;
+  const Icon = iconForCategory(category);
+  return (
+    <span className={`mt-4 inline-flex items-center gap-1.5 border ${tone.border} ${tone.bg} px-3 py-2 text-[10px] font-black uppercase tracking-widest ${tone.text}`}>
+      <Icon className="h-3 w-3" />
+      {tone.label}
+    </span>
+  );
+}
+
+function PartThumb({ component }: { component: any }) {
+  const tone = categoryTone[component.category?.toLowerCase()] || categoryTone.default;
+  const Icon = iconForCategory(component.category);
+  return (
+    <div className="flex h-[104px] w-[104px] shrink-0 items-center justify-center bg-white">
+      <div className={`flex h-16 w-16 items-center justify-center border ${tone.border} ${tone.bg}`}>
+        <Icon className={`h-9 w-9 ${tone.text}`} />
+      </div>
+    </div>
+  );
+}
+
+function getSourcesForComponent(component: any) {
+  const category = component.category?.toLowerCase();
+  if (category === "actuator") {
+    return [
+      { label: "AliExpress", className: "bg-orange-600" },
+      { label: "amazon", className: "bg-amber-400" },
+      { label: "eBay", className: "bg-blue-600 text-white" },
+    ];
+  }
+  if (category === "power" && component.name?.toLowerCase().includes("charger")) {
+    return [
+      { label: "amazon", className: "bg-amber-400" },
+      { label: "eBay", className: "bg-blue-600 text-white" },
+    ];
+  }
+  return [{ label: component.category?.toLowerCase() === "mechanical" || component.category?.toLowerCase() === "3d print" ? "fabricate" : "eBay", className: "bg-blue-600 text-white" }];
+}
+
+function iconForCategory(category = "") {
+  const cat = category.toLowerCase();
+  if (cat === "microcontroller") return Cpu;
+  if (cat === "sensor") return Database;
+  if (cat === "power") return Battery;
+  if (cat === "display") return Monitor;
+  if (cat === "actuator") return Volume2;
+  if (cat === "passives") return Sliders;
+  if (cat === "mechanical") return Wrench;
+  if (cat === "3d print") return Printer;
+  return Box;
+}
+
+function MechanicalLabel({ label, index }: { label: string; index: number }) {
+  const positions = [
+    "left-[36%] top-[19%]",
+    "left-[56%] top-[27%]",
+    "left-[51%] top-[31%]",
+    "left-[42%] top-[48%]",
+    "left-[34%] top-[52%]",
+    "left-[46%] top-[58%]",
+    "left-[48%] top-[63%]",
+    "left-[45%] top-[74%]",
+    "left-[27%] top-[82%]",
+    "left-[24%] top-[86%]",
+  ];
+  const sizes = index === 4 ? "text-lg" : index > 7 ? "text-sm" : "text-xs";
+  return (
+    <div className={`absolute ${positions[index]} ${sizes} bg-black/88 px-3 py-1 font-black uppercase tracking-[0.12em] text-violet-300 shadow-lg`}>
+      <span className="absolute -left-1 top-0 h-full w-px bg-violet-300" />
+      <span>{label}</span>
+      <span className="absolute left-1/2 top-full h-40 w-px bg-violet-200/25" />
+    </div>
+  );
+}
+
+function layerColor(key: string) {
+  if (key === "structural") return "text-cyan-400";
+  if (key === "enclosure") return "text-emerald-400";
+  if (key === "mechanism") return "text-amber-400";
+  if (key === "print") return "text-violet-300";
+  return "text-slate-400";
+}
+
+function emptyMetrics() {
+  return { electricalParts: 0, mechanicalParts: 0, totalParts: 0, electricalCost: 0, mechanicalCost: 0, totalCost: 0 };
 }

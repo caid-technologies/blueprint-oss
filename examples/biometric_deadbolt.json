@@ -3,7 +3,7 @@
     "title": "Biometric & Keyless Bluetooth Smart Deadbolt",
     "description": "A smart lock mechanism utilizing servos, status indicator LEDs, and low power bluetooth.",
     "difficulty": "Beginner",
-    "estimated_cost": 8.15,
+    "estimated_cost": 6.85,
     "category": "Smart Home"
   },
   "requirements": {
@@ -21,7 +21,8 @@
     ],
     "safety_notes": [
       "Incorporate manual lock override lever to avoid physical lockouts during total power failures.",
-      "Operate servo logic through clean voltage buffers."
+      "Operate servo logic through clean voltage buffers.",
+      "This minimal wiring pass covers the low-voltage servo lock core only; Bluetooth, biometric sensing, and bypass inputs require additional hardware before build."
     ],
     "missing_info": []
   },
@@ -83,16 +84,16 @@
       ]
     },
     {
-      "ref_des": "BAT1",
-      "part_number": "Battery-LiPo-3.7V",
-      "name": "3.7V Lithium Polymer Battery (1200mAh)",
+      "ref_des": "PWR1",
+      "part_number": "USB-5V-Plug",
+      "name": "5V USB Power Bank Feed",
       "category": "Power",
       "quantity": 1,
-      "unit_price": 5.50,
-      "rationale": "Battery source makes the lock wire-free and mountable inside the door structure.",
+      "unit_price": 1.50,
+      "rationale": "Provides a regulated 5V input for the Arduino Nano and SG90 servo without routing a 3.7V LiPo into VIN.",
       "pins": [
-        {"pin_id": "POS", "name": "Positive Lead (Red)", "pin_type": "Power", "voltage": 3.7, "description": "Positive terminal"},
-        {"pin_id": "NEG", "name": "Negative Lead (Black)", "pin_type": "Ground", "voltage": 0.0, "description": "Negative reference terminal"}
+        {"pin_id": "5V", "name": "5V Power Line", "pin_type": "Power", "voltage": 5.0, "description": "5.0V regulated rail from USB power bank or Micro-USB feed"},
+        {"pin_id": "GND", "name": "Ground", "pin_type": "Ground", "voltage": 0.0, "description": "USB power ground reference"}
       ]
     }
   ],
@@ -106,7 +107,7 @@
         {"ref_des": "U1", "pin_id": "GND"},
         {"ref_des": "ACT1", "pin_id": "GND"},
         {"ref_des": "LED1", "pin_id": "CATHODE"},
-        {"ref_des": "BAT1", "pin_id": "NEG"}
+        {"ref_des": "PWR1", "pin_id": "GND"}
       ]
     },
     {
@@ -115,6 +116,7 @@
       "net_type": "Power",
       "voltage": 5.0,
       "pins": [
+        {"ref_des": "PWR1", "pin_id": "5V"},
         {"ref_des": "U1", "pin_id": "5V"},
         {"ref_des": "ACT1", "pin_id": "5V"}
       ]
@@ -148,16 +150,6 @@
         {"ref_des": "R1", "pin_id": "2"},
         {"ref_des": "LED1", "pin_id": "ANODE"}
       ]
-    },
-    {
-      "net_id": "NET_BAT",
-      "name": "Power Feed Line",
-      "net_type": "Power",
-      "voltage": 3.7,
-      "pins": [
-        {"ref_des": "U1", "pin_id": "VIN"},
-        {"ref_des": "BAT1", "pin_id": "POS"}
-      ]
     }
   ],
   "pin_mappings": [
@@ -167,22 +159,22 @@
   "assembly": [
     {
       "step_num": 1,
-      "title": "Mount micro controller",
-      "description": "Secure the Arduino Nano on a mini breadboard. Ensure USB connector sits accessible on the edge. Run a wire from Nano 5V to the positive power row.",
+      "title": "Mount micro controller and 5V feed",
+      "description": "Secure the Arduino Nano on a mini breadboard with its USB connector accessible. Bring the 5V USB power-bank feed to the positive rail and common ground rail before attaching loads.",
       "danger_flag": false,
-      "affected_components": ["U1"]
+      "affected_components": ["U1", "PWR1"]
     },
     {
       "step_num": 2,
       "title": "Wire the Servo motor",
-      "description": "Plug the brown wire of the SG90 to Nano GND pin. Red wire connects to 5V pin. Orange wire connects to PWM pin D9 on the Nano.",
+      "description": "Plug the brown wire of the SG90 to common GND. Connect the red wire to the regulated 5V rail from PWR1, not to an unregulated LiPo or VIN feed. Connect the orange control wire to PWM pin D9 on the Nano.",
       "danger_flag": false,
       "affected_components": ["ACT1", "U1"]
     },
     {
       "step_num": 3,
       "title": "Configure current limiting Status indicator",
-      "description": "Connect a 220 Ohm resistor (R1) between Arduino pin D3 and the long lead (Anode) of the Red LED. Run a short wire from the flat edge (Cathode) of the LED to system ground.",
+      "description": "Connect a 220 Ohm resistor (R1) between Arduino pin D3 and the long lead (Anode) of the Red LED. Run a short wire from the flat edge (Cathode) of the LED to common system ground.",
       "danger_flag": false,
       "affected_components": ["LED1", "R1", "U1"]
     }
@@ -195,7 +187,87 @@
       "Infill density: 40% with tri-hexagon pattern.",
       "Custom slot on the internal face to allow backup mechanical turn-keys."
     ],
+    "fabrication_cost_estimate_usd": 5.5,
+    "cad_sources": [
+      {
+        "name": "Arduino-based electronic lock files",
+        "source_type": "Open STL",
+        "url": "https://www.thingiverse.com/thing:2350856/files",
+        "file_formats": ["STL"],
+        "license": "Thingiverse file license; verify on source page",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Reference layout includes Arduino Nano and SG90-class servo mounting for lock actuation."
+      },
+      {
+        "name": "Motorized door lock for SG90 servo",
+        "source_type": "Open STL",
+        "url": "https://cults3d.com/en/3d-model/gadget/motorized-door-lock-for-sg90-servo/similar-designs",
+        "file_formats": ["STL"],
+        "license": "Cults listing marked free in search result; verify license before reuse",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Use the SG90 servo bracket and linkage proportions as a reference for the deadbolt adapter."
+      }
+    ],
+    "render_dimensions": { "x_mm": 92, "y_mm": 64, "z_mm": 38 },
+    "component_placements": [
+      { "ref_des": "U1", "label": "Arduino Nano v3.0", "category": "Microcontroller", "layer": "electrical", "position": { "x_mm": 0, "y_mm": 0, "z_mm": -2 }, "size": { "x_mm": 38, "y_mm": 18, "z_mm": 5 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal plate", "notes": "Controller centered on the internal lock adapter plate." },
+      { "ref_des": "ACT1", "label": "SG90 Micro Servo Motor", "category": "Actuator", "layer": "mechanism", "position": { "x_mm": 26, "y_mm": 4, "z_mm": 0 }, "size": { "x_mm": 23, "y_mm": 12, "z_mm": 29 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 90 }, "mounting_face": "deadbolt cam", "notes": "Servo horn is aligned to the lock turnpiece axis." },
+      { "ref_des": "LED1", "label": "Standard Red LED (5mm)", "category": "Passives", "layer": "electrical", "position": { "x_mm": -28, "y_mm": -29, "z_mm": 10 }, "size": { "x_mm": 6, "y_mm": 4, "z_mm": 6 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Status indicator visible on the front face." },
+      { "ref_des": "R1", "label": "220 Ohm Carbon Film Resistor (1/4W)", "category": "Passives", "layer": "electrical", "position": { "x_mm": -18, "y_mm": -8, "z_mm": 1 }, "size": { "x_mm": 14, "y_mm": 4, "z_mm": 4 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal", "notes": "Inline current limiting resistor between controller and LED." },
+      { "ref_des": "PWR1", "label": "5V USB Power Bank Feed", "category": "Power", "layer": "electrical", "position": { "x_mm": -26, "y_mm": 18, "z_mm": -10 }, "size": { "x_mm": 34, "y_mm": 16, "z_mm": 8 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "rear cable entry", "notes": "Power input routed through rear strain relief." }
+    ],
+    "spatial_relationships": [
+      { "source_ref_des": "U1", "target_ref_des": "ACT1", "relation": "servo right of controller", "axis": "X", "offset_mm": 26, "notes": "Servo is laterally offset to meet the deadbolt cam." },
+      { "source_ref_des": "ACT1", "target_ref_des": "PWR1", "relation": "servo powered from rear feed", "axis": "X", "offset_mm": -52, "notes": "Power feed is routed across the rear side to the servo." },
+      { "source_ref_des": "LED1", "target_ref_des": "R1", "relation": "indicator current path", "axis": "X", "offset_mm": 10, "notes": "Resistor sits behind the front LED indicator." },
+      { "source_ref_des": "U1", "target_ref_des": "LED1", "relation": "status LED front-left of controller", "axis": "Y", "offset_mm": -29, "notes": "LED is front-mounted while the controller remains internal." }
+    ],
     "manufacturability_rating": "Moderate"
+  },
+  "constraints": [
+    "Must fit inside deadbolt door handle cavities.",
+    "Low power standby.",
+    "Operating Voltage: 5.0V",
+    "Bluetooth, biometric, and bypass-button hardware are not represented in this minimal servo wiring pass."
+  ],
+  "power_rails": [
+    {
+      "rail_id": "RAIL_5V",
+      "voltage": 5.0,
+      "max_current_capacity_ma": 1000.0,
+      "source_component": "PWR1"
+    }
+  ],
+  "estimated_current_draw_ma": 345.0,
+  "fabrication_notes": [
+    "Print in robust PETG or ABS to stand up to physical forcing.",
+    "Infill density: 40% with tri-hexagon pattern.",
+    "Custom slot on the internal face to allow backup mechanical turn-keys."
+  ],
+  "assembly_metadata": {
+    "status": "active",
+    "schematic": {
+      "canvas": {"width": 1180, "height": 680},
+      "placements": {
+        "PWR1": {"x": 300, "y": 60},
+        "U1": {"x": 460, "y": 320},
+        "ACT1": {"x": 870, "y": 120},
+        "R1": {"x": 760, "y": 340},
+        "LED1": {"x": 1010, "y": 340}
+      }
+    }
+  },
+  "validation": {
+    "critical": [],
+    "warning": [],
+    "info": [
+      {
+        "severity": "INFO",
+        "category": "Scope Gap",
+        "description": "The project title and requirements mention Bluetooth, biometric unlock, and bypass buttons, but this minimal wiring pass only represents the 5V servo deadbolt core, status LED, and current-limiting resistor.",
+        "troubleshooting": "Add a BLE-capable controller or module, fingerprint reader, and debounced bypass inputs before claiming those functions are electrically implemented."
+      }
+    ]
   },
   "validation_issues": [],
   "is_valid": true

@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 
+load_dotenv()
+
 from backend.database import get_db, init_db, DBGeneratedProject, DBComponentTemplate
 from backend.seed_db import seed_database
 from backend.models import (
@@ -14,8 +16,6 @@ from backend.models import (
 from backend.agents.orchestrator import HardwarePipelineOrchestrator
 from backend.validation import validate_circuit
 from backend.utils import generate_mermaid_chart, generate_svg_schematic
-
-load_dotenv()
 
 app = FastAPI(
     title="Blueprint Open-Source API",
@@ -58,35 +58,61 @@ def read_root():
         "docs_url": "/docs"
     }
 
+@app.get("/debug/config")
+def debug_config_endpoint():
+    """
+    Reports Gemini model resolution state without exposing the configured API key.
+    """
+    try:
+        orchestrator = HardwarePipelineOrchestrator()
+        return orchestrator.get_debug_config()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Debug config failed: {str(e)}")
+
 @app.post("/api/generate", response_model=Dict if not os.getenv("GEMINI_API_KEY") else Any)
 def generate_project_endpoint(request: GenerateProjectRequest):
     """
     Submits a natural language hardware idea and optional multimodal reference image.
     Runs the 7-agent compilation workflow, circuit safety auditor, and returns a verified Hardware IR, SVG schematic, and Mermaid diagram.
     """
-    if not request.prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt cannot be empty.")
+    prompt_text = request.prompt.strip()
+    if not prompt_text and not request.image_data:
+        raise HTTPException(status_code=400, detail="Provide a prompt or reference image.")
+    if not prompt_text:
+        prompt_text = "Infer a buildable hardware project from the uploaded reference image."
     
     try:
         image_bytes = None
         image_mime_type = None
         if request.image_data:
             try:
+                base64_data = request.image_data.strip()
                 if "," in request.image_data:
                     header, base64_data = request.image_data.split(",", 1)
                     if "data:" in header and ";base64" in header:
                         image_mime_type = header.split(";")[0].replace("data:", "")
-                else:
-                    base64_data = request.image_data
+                    base64_data = base64_data.strip()
+                if not image_mime_type:
                     image_mime_type = "image/png"
                 
                 import base64
                 image_bytes = base64.b64decode(base64_data)
             except Exception as e:
                 print(f"Error decoding base64 image: {e}")
+                if not request.prompt.strip():
+                    raise HTTPException(status_code=400, detail="Reference image could not be decoded.")
 
         orchestrator = HardwarePipelineOrchestrator()
-        ir = orchestrator.generate_project(request.prompt, image_bytes=image_bytes, image_mime_type=image_mime_type)
+        ir = orchestrator.generate_project(prompt_text, image_bytes=image_bytes, image_mime_type=image_mime_type)
+
+        if request.image_data:
+            metadata = ir.assembly_metadata or {}
+            ir.assembly_metadata = {
+                **metadata,
+                "reference_image_data": request.image_data,
+                "image_features": metadata.get("image_features") or ir.constraints[:12],
+                "input_mode": "prompt_image",
+            }
         
         # Calculate diagrams
         mermaid_code = generate_mermaid_chart(ir)
@@ -187,7 +213,7 @@ def validate_circuit_endpoint(request: ValidateCircuitRequest):
     """
     try:
         issues = validate_circuit(request.components, request.nets)
-        is_valid = not any(issue.severity == "ERROR" for issue in issues)
+        is_valid = not any(issue.severity.upper() == "CRITICAL" for issue in issues)
         return ValidationReport(is_valid=is_valid, issues=issues)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

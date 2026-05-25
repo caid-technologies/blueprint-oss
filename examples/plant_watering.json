@@ -3,7 +3,7 @@
     "title": "Auto-Grow Plant Moisture Monitor & Watering System",
     "description": "An automated soil-sensing irrigation and environment dashboard.",
     "difficulty": "Intermediate",
-    "estimated_cost": 11.00,
+    "estimated_cost": 12.50,
     "category": "Smart Home"
   },
   "requirements": {
@@ -71,7 +71,7 @@
       "pins": [
         {"pin_id": "VCC", "name": "Module Power (5V)", "pin_type": "Power", "voltage": 5.0, "description": "5V Relay coil power"},
         {"pin_id": "GND", "name": "Module Ground", "pin_type": "Ground", "voltage": 0.0, "description": "System Ground"},
-        {"pin_id": "IN", "name": "Signal Input", "pin_type": "Digital", "voltage": 5.0, "description": "Logic input to trigger coil (optocoupled)"},
+        {"pin_id": "IN", "name": "Signal Input", "pin_type": "Digital", "voltage": 3.3, "description": "3.3V-compatible logic input to trigger optocoupled relay module"},
         {"pin_id": "COM", "name": "Switch Common Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "High-power common pole"},
         {"pin_id": "NO", "name": "Switch Normally Open Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "Connected to COM only when energized"},
         {"pin_id": "NC", "name": "Switch Normally Closed Terminal", "pin_type": "Passive", "voltage": 250.0, "description": "Connected to COM by default"}
@@ -91,6 +91,19 @@
         {"pin_id": "SCL", "name": "I2C Serial Clock", "pin_type": "I2C", "voltage": 3.3, "description": "I2C SCL"},
         {"pin_id": "SDA", "name": "I2C Serial Data", "pin_type": "I2C", "voltage": 3.3, "description": "I2C SDA"}
       ]
+    },
+    {
+      "ref_des": "PWR1",
+      "part_number": "USB-5V-Plug",
+      "name": "5V USB Wall Power Supply",
+      "category": "Power",
+      "quantity": 1,
+      "unit_price": 1.50,
+      "rationale": "Provides the regulated 5V rail feeding ESP32 VIN and the relay coil supply.",
+      "pins": [
+        {"pin_id": "5V", "name": "5V Power Line", "pin_type": "Power", "voltage": 5.0, "description": "5.0V regulated rail"},
+        {"pin_id": "GND", "name": "Ground", "pin_type": "Ground", "voltage": 0.0, "description": "Ground"}
+      ]
     }
   ],
   "nets": [
@@ -103,7 +116,8 @@
         {"ref_des": "U1", "pin_id": "GND"},
         {"ref_des": "SEN1", "pin_id": "GND"},
         {"ref_des": "ACT1", "pin_id": "GND"},
-        {"ref_des": "DISP1", "pin_id": "GND"}
+        {"ref_des": "DISP1", "pin_id": "GND"},
+        {"ref_des": "PWR1", "pin_id": "GND"}
       ]
     },
     {
@@ -123,6 +137,7 @@
       "net_type": "Power",
       "voltage": 5.0,
       "pins": [
+        {"ref_des": "PWR1", "pin_id": "5V"},
         {"ref_des": "U1", "pin_id": "VIN"},
         {"ref_des": "ACT1", "pin_id": "VCC"}
       ]
@@ -178,9 +193,9 @@
     {
       "step_num": 1,
       "title": "Prepare Components & Power rails",
-      "description": "Place the ESP32 board onto a half-sized breadboard. Connect the ESP32 3V3 pin to the red rail and GND pin to the blue rail. Run a secondary VIN wire to feed 5V power to the Actuators later.",
+      "description": "Place the ESP32 board onto a half-sized breadboard. Connect PWR1 5V to ESP32 VIN and the relay VCC rail, then tie PWR1 GND to the shared ground rail. Connect ESP32 3V3 to the low-voltage sensor/display rail.",
       "danger_flag": false,
-      "affected_components": ["U1"]
+      "affected_components": ["U1", "PWR1"]
     },
     {
       "step_num": 2,
@@ -199,7 +214,7 @@
     {
       "step_num": 4,
       "title": "Install and Wire the 5V Relay Module",
-      "description": "Connect Relay VCC to ESP32 VIN (5V rail) and GND to system ground. Connect the signal input (IN) of the relay to ESP32 Pin D25.",
+      "description": "Connect Relay VCC to the PWR1 5V rail and GND to system ground. Connect the 3.3V-compatible signal input (IN) of the relay to ESP32 Pin D25.",
       "danger_flag": true,
       "danger_message": "Never connect AC mains electricity to the relay terminals without proper enclosure insulated blocks!",
       "affected_components": ["ACT1", "U1"]
@@ -213,6 +228,39 @@
       "Infill: 20% grid pattern.",
       "Material: Green or Black PLA.",
       "Ventilation grills on the side of the housing to keep the DHT22 breathing correctly."
+    ],
+    "fabrication_cost_estimate_usd": 10.0,
+    "cad_sources": [
+      {
+        "name": "Hammond 1554BGY watertight enclosure CAD",
+        "source_type": "Vendor CAD",
+        "url": "https://www.digikey.ca/en/products/detail/hammond-manufacturing/1554BGY/1090730",
+        "file_formats": ["STEP", "IGES"],
+        "license": "Vendor CAD reference for Hammond 1554BGY; verify distributor terms",
+        "estimated_unit_price_usd": 18.93,
+        "notes": "Use as an off-the-shelf sealed enclosure baseline; drill only low-side cable glands for probes and power."
+      },
+      {
+        "name": "ESP32 Project Enclosure with OLED SSD1306",
+        "source_type": "Open STL",
+        "url": "https://3dgo.app/models/printables/94864",
+        "file_formats": ["STL"],
+        "license": "Creative Commons attribution-sharealike listing mirror; verify original Printables license",
+        "estimated_unit_price_usd": 0.0,
+        "notes": "Reference display bezel and ESP32 standoff placement if a fully printed enclosure is preferred."
+      }
+    ],
+    "render_dimensions": { "x_mm": 116, "y_mm": 82, "z_mm": 55 },
+    "component_placements": [
+      { "ref_des": "U1", "label": "ESP32 NodeMCU Development Board", "category": "Microcontroller", "layer": "electrical", "position": { "x_mm": 0, "y_mm": 0, "z_mm": -2 }, "size": { "x_mm": 38, "y_mm": 28, "z_mm": 5 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal back plate", "notes": "Controller centered on internal standoffs for short signal runs." },
+      { "ref_des": "SEN1", "label": "DHT22 Temperature & Humidity Sensor", "category": "Sensor", "layer": "electrical", "position": { "x_mm": -30, "y_mm": -34, "z_mm": 10 }, "size": { "x_mm": 20, "y_mm": 12, "z_mm": 14 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "vented side", "notes": "Sensor is placed near the vent opening for airflow." },
+      { "ref_des": "DISP1", "label": "0.96 inch OLED Display (I2C)", "category": "Display", "layer": "electrical", "position": { "x_mm": 0, "y_mm": -38, "z_mm": 18 }, "size": { "x_mm": 34, "y_mm": 3, "z_mm": 18 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "front", "notes": "Display is aligned to the front face for status visibility." },
+      { "ref_des": "ACT1", "label": "5V 1-Channel Optocoupled Relay Module", "category": "Actuator", "layer": "electrical", "position": { "x_mm": 34, "y_mm": 8, "z_mm": -3 }, "size": { "x_mm": 38, "y_mm": 26, "z_mm": 16 }, "orientation_deg": { "x_deg": 0, "y_deg": 0, "z_deg": 0 }, "mounting_face": "internal back plate", "notes": "Relay is separated from the sensor side and routed to pump/valve wiring." }
+    ],
+    "spatial_relationships": [
+      { "source_ref_des": "U1", "target_ref_des": "DISP1", "relation": "display forward and above controller", "axis": "Y", "offset_mm": -38, "notes": "OLED is front-mounted while the ESP32 remains on the internal plate." },
+      { "source_ref_des": "U1", "target_ref_des": "SEN1", "relation": "sensor offset to vented side", "axis": "Y", "offset_mm": -34, "notes": "Sensor sits closer to external airflow than the controller." },
+      { "source_ref_des": "U1", "target_ref_des": "ACT1", "relation": "relay right of controller", "axis": "X", "offset_mm": 34, "notes": "Relay is kept laterally separated from low-current sensing." }
     ],
     "manufacturability_rating": "Easy"
   },

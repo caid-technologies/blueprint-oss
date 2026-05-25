@@ -2,31 +2,76 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #0b0d19;
-  color: #f1f5f9;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+:root {
+  color-scheme: dark;
 }
 
-/* Custom styles for React Flow handles and cards to make it look like a CAD editor */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: #141519;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  text-rendering: geometricPrecision;
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 .react-flow__node {
-  border-radius: 12px;
+  border-radius: 0;
 }
 
 .react-flow__handle {
-  width: 10px;
-  height: 10px;
-  background-color: #0b0d19 !important;
-  border: 2px solid #00d2ff !important;
+  width: 8px;
+  height: 8px;
+  background-color: var(--handle-color, #ffffff) !important;
+  border: 1.5px solid var(--handle-border, #22d3ee) !important;
+}
+
+.schematic-node .react-flow__handle {
+  opacity: 1;
+  box-shadow: 0 0 0 2px #ffffff;
 }
 
 .react-flow__edge-path {
   stroke-dashoffset: 0;
-  animation: dash 20s linear infinite;
+}
+
+.react-flow__edge.animated .react-flow__edge-path {
+  animation: dash 18s linear infinite;
 }
 
 .react-flow__edge.selected .react-flow__edge-path {
-  stroke: #ff007f !important;
+  stroke: #ffffff !important;
+}
+
+.react-flow__controls-button {
+  background: #ffffff !important;
+  border-bottom-color: #d9dce3 !important;
+  color: #202127 !important;
+  fill: #202127 !important;
+}
+
+.react-flow__controls-button:hover {
+  background: #ffffff !important;
+  color: #000000 !important;
+  fill: #000000 !important;
 }
 
 @keyframes dash {
@@ -38,31 +83,21 @@ body {
   }
 }
 
-/* Scrollbar customization for a clean tech look */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0f1123;
+  background: #141519;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
-  border-radius: 4px;
+  background: #42454f;
+  border: 2px solid #141519;
+  border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
-}
-
-/* Technical HUD pulse animation */
-@keyframes tech-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.9; }
-}
-
-.tech-pulse {
-  animation: tech-pulse 2s infinite;
+  background: #5b606c;
 }
