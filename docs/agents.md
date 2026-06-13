@@ -67,5 +67,6 @@ flowchart LR
 ## Notes
 - Agents run **sequentially** for determinism and traceability.
 - Validation can trigger a **repair loop** that re-invokes the wiring agent.
-- If Gemini isn’t configured (or generation fails), the backend uses a deterministic **simulation fallback** backed by the example projects.
+- If a live LLM provider isn’t configured (or generation fails), the backend uses a deterministic **simulation fallback** backed by the example projects.
 - The pipeline is designed to swap models or add agents without rewriting the core IR schema.
+- External agents can call or listen to Blueprint through the A2A layer documented in `docs/a2a.md`.

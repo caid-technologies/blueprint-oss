@@ -14,7 +14,7 @@ The frontend is a **Next.js 14** app that visualizes Hardware IR and provides th
 
 ## Primary tabs
 The main dashboard exposes several focused views:
-- **IMAGE** – project summary plus uploaded reference image (when present).
+- **IMAGE** – project summary plus generated product image, falling back to the uploaded reference image when no generated image is present.
 - **BOM** – component list and total cost.
 - **MECH** – 3D enclosure + placements (Three.js / React Three Fiber).
 - **WIRE** – interactive React Flow wiring view.

@@ -50,3 +50,5 @@ This makes the IR more than a snapshot—it’s a record of what was checked and
 
 ## Image inputs
 When `image_data` is provided to `POST /api/generate`, the backend stores the reference image in `assembly_metadata.reference_image_data` and adds lightweight extracted hints (for example `image_features`) so the UI can display the input context alongside the generated design.
+
+When image output is requested, the backend stores the generated product concept image in `assembly_metadata.product_image_data` and records `product_image_provider`, `product_image_model`, and `product_image_size`. The frontend prefers this generated image over the uploaded reference image on the IMAGE tab.

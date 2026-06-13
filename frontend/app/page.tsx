@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 
 const API_URL = "http://localhost:8000";
+const JOB_POLL_INTERVAL_MS = 5000;
 
 const samplePrompts = [
   "Compact handheld device with display, controls, USB-C power, and enclosure",
@@ -82,6 +83,7 @@ const workspaceTabs = [
   { id: "schematic", label: "WIRE", icon: Cpu },
   { id: "assembly", label: "DOCS", icon: Info },
   { id: "svg", label: "SVG", icon: Layers },
+  { id: "jobs", label: "JOBS", icon: History },
 ];
 
 function normalizeTab(tab: string | null) {
@@ -113,6 +115,24 @@ type SchematicPin = {
   name?: string;
   pin_type?: string;
   voltage?: number | null;
+};
+
+type A2AJob = {
+  job_id: string;
+  message_id?: string;
+  correlation_id?: string | null;
+  action: string;
+  sender: string;
+  recipient: string;
+  status: string;
+  server_owned?: boolean;
+  created_at?: string;
+  updated_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  payload?: Record<string, any>;
+  result_summary?: Record<string, any> | null;
+  error?: string | null;
 };
 
 type SchematicNodeData = {
@@ -212,6 +232,18 @@ function schematicHandleId(refDes: string, pinId: string) {
   return `${refDes}.${pinId}`;
 }
 
+function withProjectResponseMetadata(ir: any, response: any) {
+  if (!ir) return ir;
+  return {
+    ...ir,
+    assembly_metadata: {
+      ...(ir.assembly_metadata || {}),
+      project_id: ir.assembly_metadata?.project_id || response?.project_id,
+      frontend_job_id: ir.assembly_metadata?.frontend_job_id || response?.job_id,
+    },
+  };
+}
+
 function normalizePlacement(value: any): PlacementPoint | null {
   if (!value || typeof value.x !== "number" || typeof value.y !== "number") return null;
   return { x: value.x, y: value.y };
@@ -225,10 +257,16 @@ export default function Home() {
   const [mermaidCode, setMermaidCode] = useState<string>("");
   const [svgSchematic, setSvgSchematic] = useState<string>("");
   const [projectHistory, setProjectHistory] = useState<any[]>([]);
+  const [a2aJobs, setA2aJobs] = useState<A2AJob[]>([]);
+  const [jobsLoading, setJobsLoading] = useState(false);
+  const [jobsError, setJobsError] = useState<string | null>(null);
+  const [jobStatusFilter, setJobStatusFilter] = useState("all");
+  const [jobsLastUpdatedAt, setJobsLastUpdatedAt] = useState<string | null>(null);
   const [showHeaderRecent, setShowHeaderRecent] = useState(false);
   const [catalogComponents, setCatalogComponents] = useState<any[]>([]);
   const [serverStatus, setServerStatus] = useState<"connected" | "disconnected">("disconnected");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [generateProductImage, setGenerateProductImage] = useState(false);
   const [mechElectricalActive, setMechElectricalActive] = useState(true);
   const [mechToggles, setMechToggles] = useState({
     structural: true,
@@ -275,6 +313,47 @@ export default function Home() {
       console.error("Error fetching project history", e);
     }
   };
+
+  const fetchA2aJobs = useCallback(async (status: string, options: { silent?: boolean } = {}) => {
+    if (!options.silent) setJobsLoading(true);
+    setJobsError(null);
+    try {
+      const params = new URLSearchParams({ limit: "100" });
+      if (status !== "all") params.set("status", status);
+      const res = await fetch(`${API_URL}/api/a2a/jobs?${params.toString()}`);
+      if (!res.ok) throw new Error(`Jobs endpoint returned ${res.status}`);
+      setA2aJobs(await res.json());
+      setJobsLastUpdatedAt(new Date().toISOString());
+    } catch (e) {
+      console.error("Error fetching A2A jobs", e);
+      setJobsError("Jobs are unavailable");
+    } finally {
+      if (!options.silent) setJobsLoading(false);
+    }
+  }, []);
+
+  const changeJobStatusFilter = (status: string) => {
+    setJobStatusFilter(status);
+    fetchA2aJobs(status);
+  };
+
+  useEffect(() => {
+    fetchA2aJobs(jobStatusFilter);
+
+    const pollJobs = () => {
+      if (document.visibilityState === "visible") {
+        fetchA2aJobs(jobStatusFilter, { silent: true });
+      }
+    };
+
+    const intervalId = window.setInterval(pollJobs, JOB_POLL_INTERVAL_MS);
+    document.addEventListener("visibilitychange", pollJobs);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", pollJobs);
+    };
+  }, [fetchA2aJobs, jobStatusFilter]);
 
   const handleImageChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -463,17 +542,20 @@ export default function Home() {
         body: JSON.stringify({
           prompt: promptText,
           image_data: imageData || null,
+          generate_image: generateProductImage,
         }),
       });
 
       if (!res.ok) throw new Error("Compilation server failed");
 
       const data = await res.json();
-      setProjectIR(data.project_ir);
+      const ir = withProjectResponseMetadata(data.project_ir, data);
+      setProjectIR(ir);
       setMermaidCode(data.mermaid_code);
       setSvgSchematic(data.svg_schematic);
-      buildReactFlowGraph(data.project_ir);
+      buildReactFlowGraph(ir);
       fetchProjectHistory();
+      fetchA2aJobs(jobStatusFilter, { silent: true });
     } catch (error) {
       console.warn("Using local simulation fallback", error);
       const mockRes = await runMockCompilation(promptText, imageData);
@@ -604,16 +686,41 @@ export default function Home() {
       if (!res.ok) return;
 
       const data = await res.json();
-      setProjectIR(data.project_ir);
+      const ir = withProjectResponseMetadata(data.project_ir, data);
+      setProjectIR(ir);
       setMermaidCode(data.mermaid_code);
       setSvgSchematic(data.svg_schematic);
-      buildReactFlowGraph(data.project_ir);
+      buildReactFlowGraph(ir);
       setActiveTab("overview");
     } catch (error) {
       console.error(error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const findProjectForJob = (job: A2AJob) => {
+    const projectId = job.result_summary?.project_id;
+    if (projectId) {
+      const directMatch = projectHistory.find((project: any) => project.project_id === projectId);
+      return directMatch || { project_id: projectId };
+    }
+
+    const prompt = job.payload?.prompt;
+    const title = job.result_summary?.title;
+    if (!prompt && !title) return null;
+
+    return projectHistory.find((project: any) => {
+      const promptMatches = prompt ? project.prompt === prompt : true;
+      const titleMatches = title ? project.title === title : true;
+      return promptMatches && titleMatches;
+    }) || null;
+  };
+
+  const loadProjectForJob = async (job: A2AJob) => {
+    const project = findProjectForJob(job);
+    if (!project?.project_id) return;
+    await loadOldProject(project.project_id);
   };
 
   const downloadJSONIR = () => {
@@ -678,7 +785,21 @@ export default function Home() {
   ];
   const projectTitle = projectIR?.overview?.title || "Untitled Hardware Project";
   const projectDescription = projectIR?.overview?.description || "Generated hardware package";
-  const projectImage = projectIR?.assembly_metadata?.reference_image_data || null;
+  const projectImage =
+    projectIR?.assembly_metadata?.product_image_data ||
+    projectIR?.assembly_metadata?.product_image_url ||
+    projectIR?.assembly_metadata?.reference_image_data ||
+    null;
+  const projectImageLabel = projectIR?.assembly_metadata?.product_image_data || projectIR?.assembly_metadata?.product_image_url
+    ? `Generated by ${projectIR?.assembly_metadata?.product_image_model || projectIR?.assembly_metadata?.image_output_model || "image model"}`
+    : "Uploaded hardware reference";
+  const currentProjectId = projectIR?.assembly_metadata?.project_id || null;
+  const currentProjectJobId = projectIR?.assembly_metadata?.frontend_job_id || null;
+  const projectJobs = a2aJobs.filter((job) => {
+    if (currentProjectJobId && job.job_id === currentProjectJobId) return true;
+    if (currentProjectId && job.result_summary?.project_id === currentProjectId) return true;
+    return false;
+  });
 
   if (!projectIR) {
     return (
@@ -791,6 +912,19 @@ export default function Home() {
                   >
                     <Paperclip className="h-4 w-4" />
                   </button>
+                  <label className="inline-flex h-10 cursor-pointer items-center gap-2 border border-[#2c2f37] px-3 text-xs font-black uppercase text-slate-400 hover:border-slate-500 hover:text-white">
+                    <input
+                      type="checkbox"
+                      checked={generateProductImage}
+                      onChange={(event) => setGenerateProductImage(event.target.checked)}
+                      className="peer sr-only"
+                    />
+                    <Sparkles className={`h-4 w-4 ${generateProductImage ? "text-cyan-300" : "text-slate-500"}`} />
+                    <span>Image model</span>
+                    <span className={`h-4 w-7 border transition ${generateProductImage ? "border-cyan-300 bg-cyan-300" : "border-[#3a3d46] bg-black"}`}>
+                      <span className={`block h-full w-3.5 bg-white transition ${generateProductImage ? "translate-x-3" : "translate-x-0"}`} />
+                    </span>
+                  </label>
                 </div>
               </div>
             </form>
@@ -839,7 +973,20 @@ export default function Home() {
                 ))}
               </div>
             </div>
-            
+
+            <JobsPanel
+              jobs={a2aJobs}
+              loading={jobsLoading}
+              error={jobsError}
+              statusFilter={jobStatusFilter}
+              onStatusFilterChange={changeJobStatusFilter}
+              onRefresh={() => fetchA2aJobs(jobStatusFilter)}
+              onOpenProject={loadProjectForJob}
+              findProjectForJob={findProjectForJob}
+              lastUpdatedAt={jobsLastUpdatedAt}
+              pollIntervalMs={JOB_POLL_INTERVAL_MS}
+              compact
+            />
           </section>
         </main>
       </div>
@@ -889,6 +1036,7 @@ export default function Home() {
                 title={projectTitle}
                 description={projectDescription}
                 image={projectImage}
+                imageLabel={projectImageLabel}
                 features={imageFeatures}
                 metrics={metrics}
                 metadata={projectIR.assembly_metadata || {}}
@@ -946,6 +1094,24 @@ export default function Home() {
                 <div className="mx-auto max-w-5xl border border-[#2a2c33] bg-[#17181d] p-5" dangerouslySetInnerHTML={{ __html: svgSchematic }} />
               </div>
             )}
+
+            {activeTab === "jobs" && (
+              <JobsPanel
+                jobs={projectJobs}
+                loading={jobsLoading}
+                error={jobsError}
+                statusFilter={jobStatusFilter}
+                onStatusFilterChange={changeJobStatusFilter}
+                onRefresh={() => fetchA2aJobs(jobStatusFilter)}
+                onOpenProject={loadProjectForJob}
+                findProjectForJob={findProjectForJob}
+                lastUpdatedAt={jobsLastUpdatedAt}
+                pollIntervalMs={JOB_POLL_INTERVAL_MS}
+                title="Project Jobs"
+                description="Only jobs tied to this project are shown here."
+                emptyMessage="No jobs recorded for this project and filter."
+              />
+            )}
           </section>
         </main>
 
@@ -1002,6 +1168,7 @@ function OverviewPanel({
   title,
   description,
   image,
+  imageLabel,
   features,
   metrics,
   metadata,
@@ -1009,6 +1176,7 @@ function OverviewPanel({
   title: string;
   description: string;
   image: string | null;
+  imageLabel: string;
   features: string[];
   metrics: ReturnType<typeof emptyMetrics>;
   metadata: Record<string, any>;
@@ -1018,11 +1186,11 @@ function OverviewPanel({
       <div className="mx-auto max-w-[890px]">
         <div className="relative border border-[#2a2c33] bg-[#d5d5d3]">
           {image ? (
-            <img src={image} alt="Uploaded hardware reference" className="h-[440px] w-full object-contain" />
+            <img src={image} alt={imageLabel} className="h-[440px] w-full object-contain" />
           ) : (
             <ProductRender product={metadata.product_visual} />
           )}
-          <button className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-blue-600 shadow-lg" title="Image captured from prompt">
+          <button className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-blue-600 shadow-lg" title={image ? imageLabel : "Generated visual reference"}>
             <Eye className="h-5 w-5" />
           </button>
         </div>
@@ -1301,6 +1469,219 @@ function AssemblyPanel({ assembly, issues, onDownload }: { assembly: any[]; issu
       </div>
     </div>
   );
+}
+
+function JobsPanel({
+  jobs,
+  loading,
+  error,
+  statusFilter,
+  onStatusFilterChange,
+  onRefresh,
+  onOpenProject,
+  findProjectForJob,
+  lastUpdatedAt,
+  pollIntervalMs,
+  compact = false,
+  title = "Jobs",
+  description,
+  emptyMessage = "No jobs recorded for this filter.",
+}: {
+  jobs: A2AJob[];
+  loading: boolean;
+  error: string | null;
+  statusFilter: string;
+  onStatusFilterChange: (status: string) => void;
+  onRefresh: () => void;
+  onOpenProject: (job: A2AJob) => void;
+  findProjectForJob: (job: A2AJob) => any;
+  lastUpdatedAt: string | null;
+  pollIntervalMs: number;
+  compact?: boolean;
+  title?: string;
+  description?: string;
+  emptyMessage?: string;
+}) {
+  const visibleJobs = compact ? jobs.slice(0, 5) : jobs;
+  const filters = ["all", "queued", "running", "succeeded", "failed"];
+  const panelDescription = description || `A2A job metadata from SQLite. Polling every ${Math.round(pollIntervalMs / 1000)}s.`;
+
+  return (
+    <div className={`${compact ? "border border-[#2c2f37] bg-[#17181d] p-5" : "h-full overflow-y-auto bg-[#141519] p-6"}`}>
+      <div className="mb-5 flex items-start justify-between gap-4 border-b border-[#2a2c33] pb-4">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-cyan-400" />
+            <h2 className="text-base font-black uppercase text-white">{title}</h2>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            {panelDescription}
+          </p>
+          {lastUpdatedAt && (
+            <p className="mt-1 text-[11px] leading-5 text-slate-600">Updated {formatJobTime(lastUpdatedAt)}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="flex h-10 w-10 shrink-0 items-center justify-center border border-[#2a2c33] text-slate-400 hover:bg-white hover:text-black"
+          title="Refresh jobs"
+          aria-label="Refresh jobs"
+        >
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+
+      <div className="mb-4 flex flex-wrap gap-2">
+        {filters.map((filter) => (
+          <button
+            key={filter}
+            type="button"
+            onClick={() => onStatusFilterChange(filter)}
+            className={`border px-3 py-2 text-xs font-bold uppercase ${
+              statusFilter === filter
+                ? "border-white bg-white text-black"
+                : "border-[#2a2c33] bg-[#141519] text-slate-500 hover:border-slate-500 hover:text-white"
+            }`}
+          >
+            {filter}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <div className="mb-4 flex gap-2 border border-amber-500/30 bg-amber-950/25 p-3 text-xs leading-5 text-amber-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {loading && !visibleJobs.length ? (
+        <div className="border border-[#2a2c33] bg-[#141519] p-5 text-sm text-slate-500">Loading jobs...</div>
+      ) : visibleJobs.length ? (
+        <div className="space-y-3">
+          {visibleJobs.map((job) => (
+            <JobRow
+              key={job.job_id}
+              job={job}
+              project={findProjectForJob(job)}
+              onOpenProject={() => onOpenProject(job)}
+              compact={compact}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="border border-[#2a2c33] bg-[#141519] p-5 text-sm leading-6 text-slate-500">
+          {emptyMessage}
+        </div>
+      )}
+
+      {compact && jobs.length > visibleJobs.length && (
+        <button
+          type="button"
+          onClick={() => onStatusFilterChange(statusFilter)}
+          className="mt-4 flex w-full items-center justify-center gap-2 border border-[#2a2c33] px-4 py-3 text-xs font-black uppercase text-white hover:bg-white hover:text-black"
+        >
+          <Database className="h-4 w-4" />
+          {jobs.length} total jobs
+        </button>
+      )}
+    </div>
+  );
+}
+
+function JobRow({
+  job,
+  project,
+  onOpenProject,
+  compact,
+}: {
+  job: A2AJob;
+  project: any;
+  onOpenProject: () => void;
+  compact?: boolean;
+}) {
+  const tone = statusTone(job.status);
+  const summary = job.result_summary || {};
+  const title = summary.title || job.payload?.prompt || job.action;
+  const prompt = job.payload?.prompt || job.correlation_id || job.job_id;
+  const isOpenable = Boolean(project?.project_id);
+
+  return (
+    <article className="border border-[#2a2c33] bg-[#141519] p-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 border px-2 py-1 text-[11px] font-black uppercase ${tone}`}>
+              {job.status === "succeeded" ? <CheckCircle className="h-3.5 w-3.5" /> : job.status === "failed" ? <AlertTriangle className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {job.status}
+            </span>
+            <span className="truncate text-[11px] font-bold text-slate-500">{job.sender} {"->"} {job.recipient}</span>
+          </div>
+          <h3 className="truncate text-sm font-black text-white">{title}</h3>
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-slate-500">{prompt}</p>
+        </div>
+
+        <button
+          type="button"
+          onClick={onOpenProject}
+          disabled={!isOpenable}
+          className="inline-flex h-10 shrink-0 items-center justify-center gap-2 border border-[#2a2c33] px-3 text-xs font-black uppercase text-white hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-35"
+        >
+          <Eye className="h-4 w-4" />
+          Open
+        </button>
+      </div>
+
+      <div className={`mt-4 grid gap-2 text-[11px] ${compact ? "grid-cols-2" : "sm:grid-cols-6"}`}>
+        <JobMetric label="Job" value={job.job_id} />
+        <JobMetric label="Created" value={formatJobTime(job.created_at)} />
+        <JobMetric label="Duration" value={formatJobDuration(job)} />
+        <JobMetric label="Parts" value={summary.component_count ?? "-"} />
+        <JobMetric label="Valid" value={summary.is_valid === undefined ? "-" : summary.is_valid ? "yes" : "no"} />
+        <JobMetric label="Image" value={summary.has_product_image ? summary.product_image_model || "yes" : "-"} />
+      </div>
+
+      {job.error && (
+        <div className="mt-3 border border-rose-500/30 bg-rose-950/20 p-3 text-xs leading-5 text-rose-300">
+          {job.error}
+        </div>
+      )}
+    </article>
+  );
+}
+
+function JobMetric({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="min-w-0 border border-[#25272e] bg-[#17181d] px-3 py-2">
+      <div className="text-[10px] font-black uppercase text-slate-600">{label}</div>
+      <div className="mt-1 truncate text-xs font-bold text-slate-300">{String(value ?? "-")}</div>
+    </div>
+  );
+}
+
+function statusTone(status: string) {
+  if (status === "succeeded") return "border-emerald-500/30 bg-emerald-950/25 text-emerald-300";
+  if (status === "failed") return "border-rose-500/30 bg-rose-950/25 text-rose-300";
+  if (status === "running") return "border-cyan-500/30 bg-cyan-950/25 text-cyan-300";
+  if (status === "queued") return "border-amber-500/30 bg-amber-950/25 text-amber-300";
+  return "border-slate-500/30 bg-slate-900 text-slate-300";
+}
+
+function formatJobTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatJobDuration(job: A2AJob) {
+  if (!job.started_at || !job.completed_at) return job.status === "running" ? "running" : "-";
+  const start = new Date(job.started_at).getTime();
+  const end = new Date(job.completed_at).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "-";
+  const seconds = Math.max(1, Math.round((end - start) / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function PartsSidebar({ components, issues, isValid }: { components: any[]; issues: any[]; isValid: boolean }) {

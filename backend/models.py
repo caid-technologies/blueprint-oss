@@ -181,6 +181,10 @@ class GenerateProjectRequest(BaseModel):
         None,
         description="Optional data URL or base64-encoded reference image for multimodal project extraction"
     )
+    generate_image: bool = Field(
+        False,
+        description="When true, generate a product concept image with the configured image provider"
+    )
 
 class ValidationReport(BaseModel):
     is_valid: bool

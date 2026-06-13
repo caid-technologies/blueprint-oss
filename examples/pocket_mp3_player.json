@@ -160,8 +160,9 @@
   ],
   "assembly_metadata": {
     "status": "active",
-    "model_name": "gemini-3.5-flash",
-    "pipeline": "Gemini multimodal + ADK-style hardware agents",
+    "model_name": "simulation",
+    "llm_provider": "simulation",
+    "pipeline": "deterministic simulation + ADK-style hardware agents",
     "product_visual": "pocket_mp3_player",
     "image_features": [
       "Slim and Portable",

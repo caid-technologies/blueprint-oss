@@ -1,6 +1,6 @@
-import os
-from typing import Dict, Any
-from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, status
+from typing import Any, Dict, List
+from uuid import uuid4
+from fastapi import Body, FastAPI, Depends, HTTPException, Query, WebSocket, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
@@ -14,6 +14,20 @@ from backend.models import (
     ComponentInstance, ConnectionNet, ValidationIssue
 )
 from backend.agents.orchestrator import HardwarePipelineOrchestrator
+from backend.a2a import (
+    A2A_HUB,
+    A2AAgentRegistration,
+    A2AMessage,
+    build_generation_response,
+    get_a2a_capabilities,
+    handle_a2a_websocket,
+    handle_mcp_json_rpc,
+    start_a2a_tcp_server,
+    stop_a2a_tcp_server,
+    submit_a2a_message,
+)
+from backend.image_providers import get_image_output_debug_config
+from backend.job_store import JOB_STORE
 from backend.validation import validate_circuit
 from backend.utils import generate_mermaid_chart, generate_svg_schematic
 
@@ -34,7 +48,7 @@ app.add_middleware(
 
 # Initialize and seed database on startup
 @app.on_event("startup")
-def startup_event():
+async def startup_event():
     print("Starting up Blueprint server...")
     try:
         init_db()
@@ -48,6 +62,13 @@ def startup_event():
             print(f"Database ready with {count} component templates.")
     except Exception as e:
         print(f"Error during database startup: {e}")
+    JOB_STORE.init_db()
+    await start_a2a_tcp_server()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    await stop_a2a_tcp_server()
 
 @app.get("/")
 def read_root():
@@ -61,70 +82,126 @@ def read_root():
 @app.get("/debug/config")
 def debug_config_endpoint():
     """
-    Reports Gemini model resolution state without exposing the configured API key.
+    Reports LLM provider and model resolution state without exposing credentials.
     """
     try:
         orchestrator = HardwarePipelineOrchestrator()
-        return orchestrator.get_debug_config()
+        return {
+            **orchestrator.get_debug_config(),
+            "image_output": get_image_output_debug_config(),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Debug config failed: {str(e)}")
 
-@app.post("/api/generate", response_model=Dict if not os.getenv("GEMINI_API_KEY") else Any)
+@app.post("/api/generate", response_model=Dict[str, Any])
 def generate_project_endpoint(request: GenerateProjectRequest):
     """
     Submits a natural language hardware idea and optional multimodal reference image.
     Runs the 7-agent compilation workflow, circuit safety auditor, and returns a verified Hardware IR, SVG schematic, and Mermaid diagram.
     """
-    prompt_text = request.prompt.strip()
-    if not prompt_text and not request.image_data:
-        raise HTTPException(status_code=400, detail="Provide a prompt or reference image.")
-    if not prompt_text:
-        prompt_text = "Infer a buildable hardware project from the uploaded reference image."
-    
+    job_id = f"job_frontend_{uuid4().hex}"
+    message_id = f"msg_{uuid4().hex}"
+    payload = {
+        "prompt": request.prompt,
+        "image_data": request.image_data,
+        "generate_image": request.generate_image,
+    }
+    JOB_STORE.create_job(
+        job_id=job_id,
+        message_id=message_id,
+        correlation_id=None,
+        action="blueprint.generate_project",
+        sender="frontend",
+        recipient="blueprint",
+        payload=payload,
+        server_owned=True,
+        status="queued",
+    )
+    JOB_STORE.mark_running(job_id)
+
     try:
-        image_bytes = None
-        image_mime_type = None
-        if request.image_data:
-            try:
-                base64_data = request.image_data.strip()
-                if "," in request.image_data:
-                    header, base64_data = request.image_data.split(",", 1)
-                    if "data:" in header and ";base64" in header:
-                        image_mime_type = header.split(";")[0].replace("data:", "")
-                    base64_data = base64_data.strip()
-                if not image_mime_type:
-                    image_mime_type = "image/png"
-                
-                import base64
-                image_bytes = base64.b64decode(base64_data)
-            except Exception as e:
-                print(f"Error decoding base64 image: {e}")
-                if not request.prompt.strip():
-                    raise HTTPException(status_code=400, detail="Reference image could not be decoded.")
-
-        orchestrator = HardwarePipelineOrchestrator()
-        ir = orchestrator.generate_project(prompt_text, image_bytes=image_bytes, image_mime_type=image_mime_type)
-
-        if request.image_data:
-            metadata = ir.assembly_metadata or {}
-            ir.assembly_metadata = {
-                **metadata,
-                "reference_image_data": request.image_data,
-                "image_features": metadata.get("image_features") or ir.constraints[:12],
-                "input_mode": "prompt_image",
-            }
-        
-        # Calculate diagrams
-        mermaid_code = generate_mermaid_chart(ir)
-        svg_schematic = generate_svg_schematic(ir)
-        
+        response = build_generation_response(request.prompt, request.image_data, generate_image=request.generate_image)
+        JOB_STORE.mark_succeeded(job_id, response)
         return {
-            "project_ir": ir.model_dump(),
-            "mermaid_code": mermaid_code,
-            "svg_schematic": svg_schematic
+            **response,
+            "job_id": job_id,
+            "job": JOB_STORE.get_job(job_id),
         }
+    except ValueError as e:
+        JOB_STORE.mark_failed(job_id, str(e))
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        JOB_STORE.mark_failed(job_id, str(e))
         raise HTTPException(status_code=500, detail=f"Generation failed: {str(e)}")
+
+
+@app.get("/api/a2a/capabilities")
+def a2a_capabilities_endpoint():
+    """Advertises Blueprint's A2A transports, actions, and MCP tools."""
+    return get_a2a_capabilities()
+
+
+@app.put("/api/a2a/agents/{agent_id}")
+async def register_a2a_agent(agent_id: str, registration: A2AAgentRegistration):
+    """Registers an agent so it can receive queued A2A events."""
+    record = registration.model_dump()
+    record["agent_id"] = registration.agent_id or agent_id
+    return await A2A_HUB.register(agent_id, record)
+
+
+@app.post("/api/a2a/messages")
+async def send_a2a_message(message: A2AMessage):
+    """Submits an A2A message and queues an async result for the sender."""
+    ack = await submit_a2a_message(message)
+    return ack.model_dump()
+
+
+@app.get("/api/a2a/agents/{agent_id}/events")
+async def poll_a2a_events(
+    agent_id: str,
+    timeout: float = Query(25.0, ge=0.0, le=60.0),
+    limit: int = Query(10, ge=1, le=100),
+):
+    """Long-polls queued A2A events for an agent."""
+    events = await A2A_HUB.poll(agent_id, timeout=timeout, limit=limit)
+    return [event.model_dump() for event in events]
+
+
+@app.get("/api/a2a/jobs")
+def list_a2a_jobs(
+    sender: str | None = None,
+    job_status: str | None = Query(None, alias="status"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Lists persisted SQLite job metadata."""
+    return JOB_STORE.list_jobs(sender=sender, status=job_status, limit=limit)
+
+
+@app.get("/api/a2a/jobs/{job_id}")
+def get_a2a_job(job_id: str):
+    """Fetches persisted SQLite metadata for one A2A job."""
+    job = JOB_STORE.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="A2A job not found.")
+    return job
+
+
+@app.websocket("/api/a2a/socket/{agent_id}")
+async def a2a_websocket_endpoint(websocket: WebSocket, agent_id: str):
+    """WebSocket A2A transport. Send A2AMessage JSON; receive A2AEvent JSON."""
+    await handle_a2a_websocket(websocket, agent_id)
+
+
+@app.post("/mcp")
+async def mcp_endpoint(payload: Any = Body(...)):
+    """MCP-style JSON-RPC endpoint exposing Blueprint tools."""
+    return await handle_mcp_json_rpc(payload)
+
+
+@app.post("/api/a2a/mcp")
+async def a2a_mcp_endpoint(payload: Any = Body(...)):
+    """Alias for agents that discover MCP under the A2A route prefix."""
+    return await handle_mcp_json_rpc(payload)
 
 @app.get("/api/projects")
 def list_projects_endpoint(db: Session = Depends(get_db)):
@@ -199,7 +276,6 @@ def trigger_db_seeding():
 
 # Dedicated schemas for validate endpoint
 from pydantic import BaseModel
-from typing import List, Dict
 
 class ValidateCircuitRequest(BaseModel):
     components: List[ComponentInstance]

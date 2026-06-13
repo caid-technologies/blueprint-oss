@@ -5,7 +5,7 @@ Blueprint OSS turns prompts into structured hardware projects using a sequential
 ## System pipeline
 1. **Prompt + optional image** enters the system.
 2. **Safety guardrails** block high-risk domains early (weapons, medical, mains AC, etc.).
-3. **Model resolution** determines whether live Gemini generation runs or a deterministic simulation fallback is used.
+3. **Model resolution** determines whether live LLM generation runs or a deterministic simulation fallback is used.
 4. **Intent Parser Agent** produces a high-level `ProjectOverview`.
 5. **Requirements Agent** extracts functional requirements and constraints.
 6. **Component Selection Agent** chooses parts from the seed database.
@@ -17,20 +17,21 @@ Blueprint OSS turns prompts into structured hardware projects using a sequential
 12. **Assembly Instruction Agent** emits step-by-step build guidance.
 13. **Post-processing** enriches missing mechanical placements for the 3D viewer.
 14. **Hardware IR** is stored in the database and rendered in the UI.
+15. **A2A transports** expose generation and validation to external agents over REST, WebSocket, optional TCP JSONL, and MCP-style JSON-RPC.
 
 ## Orchestration and model runtime
 - The backend runs an **ADK-style sequential workflow** implemented in `backend/agents/orchestrator.py`.
-- **Gemini (google-genai)** is used for structured JSON output when `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is configured.
-- Default model configuration targets **Gemini 3.5 Flash** (`GEMINI_MODEL=gemini-3.5-flash`) with a fallback to **Gemini 2.5 Flash** (`GEMINI_FALLBACK_MODEL=gemini-2.5-flash`).
-- With `STRICT_GEMINI=true` (default), the backend fails fast when the requested model is unavailable.
-- With `STRICT_GEMINI=false`, the backend may switch to the fallback model.
+- Live structured JSON output is routed through `backend/llm_providers.py`.
+- Supported providers are `gemini`, `openai`, `openai-compatible`, and `simulation`.
+- Generic configuration uses `LLM_PROVIDER`, `LLM_API_KEY`, `LLM_MODEL`, `STRICT_LLM`, and `LLM_FALLBACK_MODEL`.
+- Gemini-specific variables (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_MODEL`, `STRICT_GEMINI`, `GEMINI_FALLBACK_MODEL`) remain supported as compatibility aliases.
 - If no API key is configured (or generation errors), the backend uses a deterministic simulation fallback backed by curated example projects.
 
 ## System diagram
 ```mermaid
 flowchart TD
   A[Prompt + optional image] --> S[Safety guardrails]
-  S --> M[Model resolution\n(live Gemini vs simulation)]
+  S --> M[Model resolution\n(live LLM vs simulation)]
   M --> B[Intent Parser Agent]
   B --> C[Requirements Agent]
   C --> D[Component Selection Agent]
@@ -43,11 +44,13 @@ flowchart TD
   P --> I[Typed Hardware IR]
   I --> J[UI: React Flow + SVG + Mermaid + 3D mech]
   I --> K[(Project database)]
+  I --> L[A2A: REST + WebSocket + TCP JSONL + MCP]
 ```
 
 ## Core subsystems
 - **Frontend (Next.js + React Flow):** Visualizes the structured project, nets, BOM, and instructions.
 - **Backend (FastAPI):** Hosts the orchestration layer, validation, and storage APIs.
+- **A2A broker:** Lets external agents register, send messages, listen for queued events, or call Blueprint tools through MCP-style JSON-RPC.
 - **Database (Postgres/SQLite):** Stores component templates and generated projects.
 - **Utilities:** Render Mermaid and SVG schematics from the IR.
 

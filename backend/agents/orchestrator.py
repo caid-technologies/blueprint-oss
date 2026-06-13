@@ -1,7 +1,5 @@
-import os
 import json
 import logging
-from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
@@ -9,14 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-try:
-    from google import genai
-    from google.genai import types
-except ImportError:
-    genai = None
-    types = None
-
 from backend.database import SessionLocal, DBComponentTemplate, DBGeneratedProject
+from backend.llm_providers import LLMProviderConfigError, LLMProviderValidation, build_llm_provider
 from backend.models import (
     HardwareIR, ProjectOverview, FunctionalRequirements, 
     ComponentInstance, ConnectionNet, PinReference, AssemblyStep, 
@@ -27,90 +19,6 @@ from backend.models import (
 from backend.validation import validate_circuit, check_safety_violations, build_validation_summary
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
-DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
-UNAVAILABLE_GEMINI_35_FLASH_MESSAGE = (
-    "Configured model gemini-3.5-flash is not available for this API key/provider. "
-    "Check available models or configure a valid Gemini 3.5 Flash model ID."
-)
-
-
-class GeminiModelConfigError(RuntimeError):
-    """Raised when Gemini model configuration prevents live generation."""
-
-
-@dataclass
-class GeminiModelValidation:
-    requested_model: str
-    actual_model: Optional[str]
-    requested_model_available: bool
-    strict_mode: bool
-    fallback_active: bool
-    fallback_model: str
-    validation_error: Optional[str] = None
-
-    def as_debug_dict(self) -> Dict[str, Any]:
-        return {
-            "requested_model": self.requested_model,
-            "actual_model": self.actual_model,
-            "requested_model_available": self.requested_model_available,
-            "strict_mode": self.strict_mode,
-            "fallback_active": self.fallback_active,
-            "validation_error": self.validation_error,
-        }
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _normalize_model_name(model_name: str) -> str:
-    return model_name.strip().removeprefix("models/")
-
-
-def _model_is_available(model_name: str, available_models: List[str]) -> bool:
-    requested = _normalize_model_name(model_name)
-    return any(_normalize_model_name(candidate) == requested for candidate in available_models)
-
-
-def _list_generate_content_models() -> List[str]:
-    """List models available to this Gemini API key/provider for generateContent."""
-    if client is None:
-        return []
-
-    available_models: List[str] = []
-    for model in client.models.list():
-        name = getattr(model, "name", None)
-        if not name:
-            continue
-
-        supported_actions = getattr(model, "supported_actions", None)
-        if supported_actions is None and isinstance(model, dict):
-            supported_actions = model.get("supportedActions") or model.get("supported_actions")
-        supported_actions = supported_actions or []
-
-        if "generateContent" in supported_actions:
-            available_models.append(name)
-
-    return available_models
-
-# Initialize Google GenAI Client if API key is provided
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-client = None
-if GEMINI_API_KEY and genai:
-    try:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        logger.info("Google GenAI client initialized successfully.")
-    except Exception as e:
-        logger.error(f"Error initializing GenAI client: {e}")
-elif GEMINI_API_KEY and not genai:
-    logger.warning("GEMINI_API_KEY is set, but google-genai is unavailable. Running in simulated/fallback mode.")
-else:
-    logger.warning("No GEMINI_API_KEY or GOOGLE_API_KEY found. Multi-agent generation will run in high-fidelity simulated/fallback mode.")
 
 # Tool to query database templates
 def get_db_component_templates() -> List[Dict[str, Any]]:
@@ -479,142 +387,32 @@ def build_mechanical_render_data(ir: HardwareIR) -> HardwareIR:
 # Define the ADK-style Multi-Agent Orchestrator
 class HardwarePipelineOrchestrator:
     def __init__(self, use_simulation: bool = False):
-        self.use_simulation = use_simulation or (client is None)
-        self.requested_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
-        self.fallback_model = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_FALLBACK_MODEL).strip() or DEFAULT_GEMINI_FALLBACK_MODEL
-        self.strict_gemini = _env_bool("STRICT_GEMINI", default=True)
-        self.model_name = self.requested_model
-        self._model_validation: Optional[GeminiModelValidation] = None
-
-    def validate_configured_model(self, *, raise_on_strict: bool = True) -> GeminiModelValidation:
-        """Resolve and validate the Gemini model that should be used for generation."""
-        if self._model_validation:
-            if raise_on_strict and self._model_validation.validation_error and self.strict_gemini:
-                raise GeminiModelConfigError(self._model_validation.validation_error)
-            return self._model_validation
-
-        if client is None:
-            self._model_validation = GeminiModelValidation(
-                requested_model=self.requested_model,
-                actual_model=None,
-                requested_model_available=False,
-                strict_mode=self.strict_gemini,
-                fallback_active=False,
-                fallback_model=self.fallback_model,
-                validation_error="Gemini client is not configured; live generation is running in simulation mode.",
-            )
-            return self._model_validation
-
-        try:
-            available_models = _list_generate_content_models()
-        except Exception as exc:
-            validation_error = f"Unable to validate Gemini model availability: {exc}"
-            actual_model = self.fallback_model if not self.strict_gemini else None
-            self._model_validation = GeminiModelValidation(
-                requested_model=self.requested_model,
-                actual_model=actual_model,
-                requested_model_available=False,
-                strict_mode=self.strict_gemini,
-                fallback_active=not self.strict_gemini,
-                fallback_model=self.fallback_model,
-                validation_error=validation_error,
-            )
-            if self.strict_gemini and raise_on_strict:
-                raise GeminiModelConfigError(validation_error)
-            self.model_name = actual_model or self.requested_model
-            return self._model_validation
-
-        requested_available = _model_is_available(self.requested_model, available_models)
-        if requested_available:
-            self.model_name = self.requested_model
-            self._model_validation = GeminiModelValidation(
-                requested_model=self.requested_model,
-                actual_model=self.model_name,
-                requested_model_available=True,
-                strict_mode=self.strict_gemini,
-                fallback_active=False,
-                fallback_model=self.fallback_model,
-            )
-            return self._model_validation
-
-        if self.strict_gemini:
-            validation_error = (
-                UNAVAILABLE_GEMINI_35_FLASH_MESSAGE
-                if self.requested_model == DEFAULT_GEMINI_MODEL
-                else (
-                    f"Configured model {self.requested_model} is not available for this API key/provider. "
-                    "Check available models or configure a valid Gemini model ID."
-                )
-            )
-            self._model_validation = GeminiModelValidation(
-                requested_model=self.requested_model,
-                actual_model=None,
-                requested_model_available=False,
-                strict_mode=True,
-                fallback_active=False,
-                fallback_model=self.fallback_model,
-                validation_error=validation_error,
-            )
-            if raise_on_strict:
-                raise GeminiModelConfigError(validation_error)
-            return self._model_validation
-
-        fallback_available = _model_is_available(self.fallback_model, available_models)
-        if not fallback_available:
-            validation_error = (
-                f"Configured model {self.requested_model} is not available, and fallback model "
-                f"{self.fallback_model} is not available for this API key/provider."
-            )
-            self._model_validation = GeminiModelValidation(
-                requested_model=self.requested_model,
-                actual_model=None,
-                requested_model_available=False,
-                strict_mode=False,
-                fallback_active=False,
-                fallback_model=self.fallback_model,
-                validation_error=validation_error,
-            )
-            raise GeminiModelConfigError(validation_error)
-
-        self.model_name = self.fallback_model
-        self._model_validation = GeminiModelValidation(
-            requested_model=self.requested_model,
-            actual_model=self.model_name,
-            requested_model_available=False,
-            strict_mode=False,
-            fallback_active=True,
-            fallback_model=self.fallback_model,
-        )
-        return self._model_validation
+        self.llm_provider = build_llm_provider()
+        self.use_simulation = use_simulation or not self.llm_provider.is_configured
+        self.model_name = self.llm_provider.model_name
 
     def get_debug_config(self) -> Dict[str, Any]:
-        """Return Gemini model resolution details without exposing credentials."""
+        """Return LLM provider resolution details without exposing credentials."""
         return self.validate_configured_model(raise_on_strict=False).as_debug_dict()
 
-    def _call_gemini_structured(self, prompt: str, schema_class: Any, image_bytes: Optional[bytes] = None, image_mime_type: Optional[str] = None) -> Any:
-        """Helper to invoke Gemini with structured JSON schemas, supporting optional multimodal image input."""
+    def validate_configured_model(self, *, raise_on_strict: bool = True) -> LLMProviderValidation:
+        """Resolve and validate the configured LLM provider/model."""
+        validation = self.llm_provider.validate_configured_model(raise_on_strict=raise_on_strict)
+        self.model_name = validation.actual_model or self.llm_provider.model_name
+        return validation
+
+    def _call_llm_structured(self, prompt: str, schema_class: Any, image_bytes: Optional[bytes] = None, image_mime_type: Optional[str] = None) -> Any:
+        """Invoke the configured LLM provider for structured JSON output."""
         if self.use_simulation:
             raise RuntimeError("Simulation mode is active; should use simulated generator instead.")
-            
-        try:
-            contents = []
-            if image_bytes and image_mime_type:
-                contents.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime_type))
-            contents.append(prompt)
 
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=schema_class,
-                    temperature=0.2,
-                )
-            )
-            return schema_class.model_validate_json(response.text)
+        try:
+            result = self.llm_provider.generate_structured(prompt, schema_class, image_bytes, image_mime_type)
+            self.model_name = self.llm_provider.model_name
+            return result
         except Exception as e:
-            logger.error(f"Gemini structured call failed: {e}")
-            raise e
+            logger.error(f"LLM structured call failed via {self.llm_provider.provider_name}: {e}")
+            raise
 
     def generate_project(self, user_prompt: str, image_bytes: Optional[bytes] = None, image_mime_type: Optional[str] = None) -> HardwareIR:
         """Orchestrates the 7-agent hardware compilation pipeline with verification loop."""
@@ -657,7 +455,11 @@ class HardwarePipelineOrchestrator:
                 power_rails=[],
                 estimated_current_draw_ma=0.0,
                 fabrication_notes=["Compilation blocked"],
-                assembly_metadata={"status": "blocked"},
+                assembly_metadata={
+                    "status": "blocked",
+                    "llm_provider": self.llm_provider.provider_name,
+                    "pipeline": "safety guardrail",
+                },
                 project_version_history=[{"version": "0.1", "description": "Blocked design generation due to safety violations"}],
                 validation=validation_summary,
                 is_valid=False
@@ -681,7 +483,7 @@ class HardwarePipelineOrchestrator:
             User Idea: "{user_prompt}"
             Generate the ProjectOverview schema containing title, description, difficulty, estimated cost (set to 0 for now), and category.
             """
-            overview: ProjectOverview = self._call_gemini_structured(intent_prompt, ProjectOverview, image_bytes, image_mime_type)
+            overview: ProjectOverview = self._call_llm_structured(intent_prompt, ProjectOverview, image_bytes, image_mime_type)
 
             # 2. Requirements Agent
             logger.info("Invoking Requirements Agent...")
@@ -692,7 +494,7 @@ class HardwarePipelineOrchestrator:
             Project Description: "{overview.description}"
             Generate the FunctionalRequirements schema. Make sure to identify appropriate operating voltage (usually 3.3V or 5V depending on common microcontrollers like ESP32 or Arduino).
             """
-            requirements: FunctionalRequirements = self._call_gemini_structured(req_prompt, FunctionalRequirements, image_bytes, image_mime_type)
+            requirements: FunctionalRequirements = self._call_llm_structured(req_prompt, FunctionalRequirements, image_bytes, image_mime_type)
 
             # 3. Component Selection Agent
             logger.info("Invoking Component Selection Agent...")
@@ -722,7 +524,7 @@ class HardwarePipelineOrchestrator:
             class ComponentListWrapper(BaseModel):
                 components: List[ComponentInstance]
                 
-            comp_wrapper: ComponentListWrapper = self._call_gemini_structured(comp_prompt, ComponentListWrapper, image_bytes, image_mime_type)
+            comp_wrapper: ComponentListWrapper = self._call_llm_structured(comp_prompt, ComponentListWrapper, image_bytes, image_mime_type)
             components = comp_wrapper.components
 
             # Compile intermediate IR for wiring
@@ -746,7 +548,9 @@ class HardwarePipelineOrchestrator:
                - I2C SDA connects to the MCU's SDA (e.g., ESP32 pin 'D21' or Arduino pin 'A4')
                - Digital sensor data pins connect to any Digital/GPIO pin on the MCU.
                - PWM actuators connect to a PWM-capable pin on the MCU.
-            4. Do NOT leave critical pins unconnected.
+            4. Every physical pin should appear in only one net. Do not place the same signal pin in multiple nets.
+            5. Passive parts bridge nets by using one passive pin per net. For a pull-up resistor, put one resistor pin on the signal net and the other resistor pin on the power rail; do not create a separate pull-up signal net containing the sensor data pin.
+            6. Do NOT leave critical pins unconnected.
             
             Generate:
             - nets: List of ConnectionNet. Each net has net_id, name, net_type (Power, Ground, I2C, SPI, Digital, PWM, Analog), voltage, and pins (list of PinReference: ref_des + pin_id).
@@ -758,7 +562,7 @@ class HardwarePipelineOrchestrator:
                 nets: List[ConnectionNet]
                 pin_mappings: List[PinMappingEntry]
 
-            wiring_data: WiringWrapper = self._call_gemini_structured(wiring_prompt, WiringWrapper, image_bytes, image_mime_type)
+            wiring_data: WiringWrapper = self._call_llm_structured(wiring_prompt, WiringWrapper, image_bytes, image_mime_type)
             nets = wiring_data.nets
             pin_mappings = wiring_data.pin_mappings
 
@@ -788,10 +592,11 @@ class HardwarePipelineOrchestrator:
                 - If there's a Voltage Mismatch (e.g. 5V logic connected to 3.3V), either suggest level conversion or use a compatible operating voltage / net.
                 - If an IC is unpowered, connect its VCC and GND pins to the corresponding power/ground nets.
                 - If a pin is reused in multiple signal nets, fix the mapping to separate GPIO pins.
+                - A physical pin must appear in only one net. For pull-up or pull-down resistors, put one resistor pin on the signal net and the other resistor pin on the power/ground rail; never put the sensor/MCU signal pin in a separate resistor-only signal net.
                 
                 Generate a corrected list of ConnectionNet and PinMappingEntry.
                 """
-                corrected_wiring: WiringWrapper = self._call_gemini_structured(healing_prompt, WiringWrapper, image_bytes, image_mime_type)
+                corrected_wiring: WiringWrapper = self._call_llm_structured(healing_prompt, WiringWrapper, image_bytes, image_mime_type)
                 nets = corrected_wiring.nets
                 pin_mappings = corrected_wiring.pin_mappings
                 
@@ -820,7 +625,7 @@ class HardwarePipelineOrchestrator:
             Use source URLs only when they are known from supplied source data or a browsing/sourcing agent result. Do not invent URLs.
             Generate the MechanicalNotes schema.
             """
-            mechanical: MechanicalNotes = self._call_gemini_structured(mech_prompt, MechanicalNotes, image_bytes, image_mime_type)
+            mechanical: MechanicalNotes = self._call_llm_structured(mech_prompt, MechanicalNotes, image_bytes, image_mime_type)
 
             # 7. Assembly Instruction Agent
             logger.info("Invoking Assembly Instruction Agent...")
@@ -836,7 +641,7 @@ class HardwarePipelineOrchestrator:
             class AssemblyWrapper(BaseModel):
                 steps: List[AssemblyStep]
                 
-            assembly_wrapper: AssemblyWrapper = self._call_gemini_structured(assembly_prompt, AssemblyWrapper, image_bytes, image_mime_type)
+            assembly_wrapper: AssemblyWrapper = self._call_llm_structured(assembly_prompt, AssemblyWrapper, image_bytes, image_mime_type)
             assembly = assembly_wrapper.steps
 
             # Dynamic field extractions
@@ -863,15 +668,16 @@ class HardwarePipelineOrchestrator:
                 power_rails=power_rails,
                 estimated_current_draw_ma=current_draw,
                 fabrication_notes=fab_notes,
-            assembly_metadata={
-                "generated_at": datetime.utcnow().isoformat(),
-                "revision": 1,
-                "model_name": self.model_name,
-                "fallback_mode": model_validation.fallback_active,
-                "requested_model": model_validation.requested_model,
-                "actual_model": model_validation.actual_model,
-                "pipeline": "Gemini multimodal + ADK-style hardware agents",
-            },
+                assembly_metadata={
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "revision": 1,
+                    "model_name": self.model_name,
+                    "fallback_mode": model_validation.fallback_active,
+                    "requested_model": model_validation.requested_model,
+                    "actual_model": model_validation.actual_model,
+                    "llm_provider": model_validation.provider,
+                    "pipeline": "provider-agnostic structured LLM + ADK-style hardware agents",
+                },
                 project_version_history=[{"version": "0.1", "description": "Initial design compilation via 7-agent ADK pipeline"}],
                 validation=validation_summary,
                 is_valid=is_valid
@@ -882,7 +688,7 @@ class HardwarePipelineOrchestrator:
             self.save_project_to_db(user_prompt, project_ir)
             return project_ir
 
-        except GeminiModelConfigError:
+        except LLMProviderConfigError:
             raise
         except Exception as e:
             logger.error(f"Pipeline execution encountered an error: {e}. Falling back to simulation.")
@@ -894,6 +700,10 @@ class HardwarePipelineOrchestrator:
         try:
             import uuid
             project_id = f"proj_{uuid.uuid4().hex[:8]}"
+            ir.assembly_metadata = {
+                **(ir.assembly_metadata or {}),
+                "project_id": project_id,
+            }
             
             db_project = DBGeneratedProject(
                 project_id=project_id,
@@ -914,7 +724,7 @@ class HardwarePipelineOrchestrator:
             db.close()
 
     def _generate_simulated_project(self, prompt: str, has_image: bool = False) -> HardwareIR:
-        """High-fidelity, deterministic simulated generator used as fallback or when GEMINI_API_KEY is not configured."""
+        """High-fidelity, deterministic simulated generator used as fallback when live LLM generation is unavailable."""
         logger.info(f"Generating simulated project package for: '{prompt}'")
         
         prompt_lower = prompt.lower()
@@ -1209,7 +1019,8 @@ class HardwarePipelineOrchestrator:
             assembly_metadata={
                 "status": "active",
                 "model_name": self.model_name,
-                "pipeline": "Gemini multimodal + ADK-style hardware agents",
+                "llm_provider": self.llm_provider.provider_name,
+                "pipeline": "deterministic simulation + ADK-style hardware agents",
                 "product_visual": "pocket_mp3_player",
                 "image_features": requirements.physical_constraints,
                 "render_dimensions": {"x_mm": 100, "y_mm": 21, "z_mm": 54}
@@ -1471,6 +1282,9 @@ class HardwarePipelineOrchestrator:
             fabrication_notes=mechanical.fabrication_details,
             assembly_metadata={
                 "status": "active",
+                "model_name": self.model_name,
+                "llm_provider": self.llm_provider.provider_name,
+                "pipeline": "deterministic simulation + ADK-style hardware agents",
                 "schematic": {
                     "canvas": {"width": 1180, "height": 720},
                     "placements": {
@@ -1727,6 +1541,9 @@ class HardwarePipelineOrchestrator:
             fabrication_notes=mechanical.fabrication_details,
             assembly_metadata={
                 "status": "active",
+                "model_name": self.model_name,
+                "llm_provider": self.llm_provider.provider_name,
+                "pipeline": "deterministic simulation + ADK-style hardware agents",
                 "schematic": {
                     "canvas": {"width": 1180, "height": 720},
                     "placements": {
@@ -1968,6 +1785,9 @@ class HardwarePipelineOrchestrator:
             fabrication_notes=mechanical.fabrication_details,
             assembly_metadata={
                 "status": "active",
+                "model_name": self.model_name,
+                "llm_provider": self.llm_provider.provider_name,
+                "pipeline": "deterministic simulation + ADK-style hardware agents",
                 "schematic": {
                     "canvas": {"width": 1180, "height": 680},
                     "placements": {

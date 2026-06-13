@@ -26,6 +26,12 @@ Archived outputs from the pipeline.
 - `hardware_ir` (JSON representation of the IR)
 - `created_at`
 
+### a2a_jobs
+A2A job metadata is stored separately with the Python stdlib `sqlite3` module, regardless of whether `DATABASE_URL` points at PostgreSQL or SQLite.
+- Default path: `./blueprint_jobs.db`
+- Override: `JOB_METADATA_DB_PATH`
+- Stored data: job ids, sender/recipient/action, lifecycle status, timestamps, redacted payload metadata, compact result summaries, and errors
+
 ## Seeding the database
 Seed data is defined in `backend/seed_db.py`. Running:
 ```bash
